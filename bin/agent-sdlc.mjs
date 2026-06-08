@@ -1296,6 +1296,7 @@ function readRequestJson(req) {
 function runCliAction(root, runId, action, body = {}) {
   const baseArgs = ['--repo', root, '--run', runId];
   const actionArgs = {
+    'execute': ['feature', 'execute', ...baseArgs, '--target-file', String(body.targetFile || body['target-file'] || ''), '--set-key', String(body.setKey || body['set-key'] || ''), '--set-value', String(body.setValue ?? body['set-value'] ?? ''), '--mock-agent', '--auto-approve'],
     'pr-preview': ['feature', 'pr-preview', ...baseArgs],
     'audit-report': ['run', 'audit-report', ...baseArgs],
     'create-pr': ['feature', 'create-pr', ...baseArgs, '--provider', String(body.provider || 'stash'), '--project-key', String(body.projectKey || body['project-key'] || 'TBD_PROJECT'), '--repo-slug', String(body.repoSlug || body['repo-slug'] || 'TBD_REPO'), '--reviewers', parseCsv(body.reviewers).join(','), '--dry-run'],
@@ -1372,6 +1373,12 @@ function missionControlHtml() {
       </div>
       <h3>Workflow actions</h3>
       <div class="row">
+        <input id="targetFile" placeholder="target file">
+        <input id="setKey" placeholder="config key">
+        <input id="setValue" placeholder="value">
+        <button onclick="runAction('execute')">Execute config change</button>
+      </div>
+      <div class="row">
         <button onclick="runAction('pr-preview')">Generate PR preview</button>
         <button onclick="runAction('audit-report')">Audit report</button>
         <button onclick="runAction('create-pr')">Create PR request</button>
@@ -1425,7 +1432,7 @@ async function rejectGate() {
 async function scanRepo() { document.getElementById('raw').textContent = JSON.stringify(await api('/api/repo/scan'), null, 2); }
 async function runAction(action) {
   if (!selectedRun) return alert('select a run first');
-  const payload = action === 'create-pr' ? { projectKey: 'TBD_PROJECT', repoSlug: 'TBD_REPO', reviewers: [] } : {};
+  const payload = action === 'create-pr' ? { projectKey: 'TBD_PROJECT', repoSlug: 'TBD_REPO', reviewers: [] } : action === 'execute' ? { targetFile: targetFile.value, setKey: setKey.value, setValue: setValue.value } : {};
   const result = await api('/api/runs/' + encodeURIComponent(selectedRun) + '/actions/' + encodeURIComponent(action), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
   document.getElementById('raw').textContent = JSON.stringify(result, null, 2);
   await selectRun(selectedRun);

@@ -331,7 +331,6 @@ function waitForDaemon(child) {
 
 test('daemon serves mission-control UI, status API, artifacts, and approval updates', async () => {
   const repo = makeRepo();
-  executeAndPreview(repo);
   const child = spawn('node', [cli, 'daemon', 'start', '--repo', repo, '--port', '0'], { encoding: 'utf8' });
   try {
     const baseUrl = await waitForDaemon(child);
@@ -344,7 +343,22 @@ test('daemon serves mission-control UI, status API, artifacts, and approval upda
 
     const runs = await fetch(`${baseUrl}/api/runs`).then((res) => res.json());
     assert.equal(runs.runs[0].runId, 'run-1');
-    assert.equal(runs.runs[0].state, 'waiting_pr_approval');
+    assert.equal(runs.runs[0].state, 'waiting_execution_approval');
+
+    const executed = await fetch(`${baseUrl}/api/runs/run-1/actions/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetFile: 'src/main/resources/application.yml', setKey: 'feature.enabled', setValue: 'true' }),
+    }).then((res) => res.json());
+    assert.equal(executed.action, 'execute');
+    assert.equal(executed.state.state, 'waiting_pr_approval');
+
+    const preview = await fetch(`${baseUrl}/api/runs/run-1/actions/pr-preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }).then((res) => res.json());
+    assert.equal(preview.action, 'pr-preview');
 
     const status = await fetch(`${baseUrl}/api/runs/run-1/status`).then((res) => res.json());
     assert.equal(status.validation.ok, true);
