@@ -8,6 +8,9 @@ Source code layout:
 src/main.mjs                         # thin public source entrypoint
 src/app.mjs                          # thin application command dispatcher
 src/cli/args.mjs                     # CLI argument parsing
+src/adapters/types.mjs                # provider adapter contract phases
+src/adapters/index.mjs                # provider adapter resolver
+src/adapters/mock-agent.mjs           # deterministic local mock execution adapter
 src/commands/feature.mjs             # feature execution, PR preview/request, enterprise previews
 src/commands/run.mjs                 # run init/list/status/audit-report commands
 src/commands/approval.mjs            # approval gate commands
@@ -146,6 +149,7 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/repo-scan.json
 .agentic-sdlc/policy-validation.json
 .agentic-sdlc/config-validation.json
+.agentic-sdlc/runs/<run-id>/agent-adapter.json
 .agentic-sdlc/runs/<run-id>/changed-files.json
 .agentic-sdlc/runs/<run-id>/diff.patch
 .agentic-sdlc/runs/<run-id>/maven-output.txt
@@ -155,7 +159,7 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/events.jsonl
 ```
 
-The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, applies a deterministic config change, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
+The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic mock adapter config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
 
 For `.yaml`/`.yml` target files, dotted keys are written as nested YAML. For example `--set-key feature.enabled --set-value true` writes:
 

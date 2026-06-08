@@ -43,8 +43,15 @@ test('feature execute applies controlled config change and persists artifacts', 
   assert.deepEqual(payload.changedFiles, ['src/main/resources/application.yml']);
   assert.equal(payload.validation.ok, true);
   assert.equal(payload.confidence.rating, 'high');
+  assert.equal(payload.adapter.provider, 'mock-agent');
+  assert.equal(payload.adapter.phase, 'execute_approved_plan');
 
   const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  const adapter = JSON.parse(readFileSync(join(runDir, 'agent-adapter.json'), 'utf8'));
+  assert.equal(adapter.provider, 'mock-agent');
+  assert.equal(adapter.phase, 'execute_approved_plan');
+  assert.deepEqual(adapter.capabilities, ['deterministic_config_change']);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /adapter_phase_completed/);
   assert.match(readFileSync(join(repo, 'src/main/resources/application.yml'), 'utf8'), /feature:\n  enabled: true/);
   assert.match(readFileSync(join(runDir, 'diff.patch'), 'utf8'), /agent-sdlc mock config change/);
   assert.ok(existsSync(join(runDir, 'changed-files.json')));
@@ -338,6 +345,9 @@ test('source code uses production module directories and thin entrypoints', () =
     '../src/core/policy.mjs',
     '../src/core/approvals.mjs',
     '../src/core/config.mjs',
+    '../src/adapters/index.mjs',
+    '../src/adapters/mock-agent.mjs',
+    '../src/adapters/types.mjs',
     '../src/core/confidence.mjs',
     '../src/core/repo.mjs',
     '../src/core/run-context.mjs',

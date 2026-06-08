@@ -29,6 +29,7 @@ What already exists:
 - Thin source entrypoint in `src/main.mjs`
 - Thin command dispatcher in `src/app.mjs`
 - Command handlers in `src/commands/`
+- Provider adapter contract/resolver/mock adapter in `src/adapters/`
 - Core helpers in `src/core/`
 - Local daemon server and UI modules in `src/daemon/`
 - Thin executable entrypoint in `bin/agent-sdlc.mjs`
@@ -71,7 +72,7 @@ Supported daemon actions:
 Current workflow shape:
 1. `run init` scaffolds `.agentic-sdlc/runs/<run-id>/manifest.json`, `context-pack.json`, `approvals.jsonl`, `events.jsonl`, and `.agentic-sdlc/policy.json`.
 2. Approve `implementation_plan`.
-3. `feature execute` creates/checks out a safe working branch, applies an explicit deterministic config change, validates config, runs validation commands, writes changed-files/diff/output/summary/confidence artifacts, and stops at `waiting_pr_approval`.
+3. `feature execute` creates/checks out a safe working branch, resolves `mock-agent` through the adapter layer, applies an explicit deterministic config change, writes `agent-adapter.json`, validates config, runs validation commands, writes changed-files/diff/output/summary/confidence artifacts, and stops at `waiting_pr_approval`.
 4. `feature pr-preview` writes PR title/body/checklist/preview artifacts only.
 5. Approve `pr_creation`.
 6. `feature create-pr` writes a dry-run Stash/Bitbucket request artifact only.
@@ -89,6 +90,7 @@ Core artifact paths:
 - `.agentic-sdlc/runs/<run-id>/context-pack.json`
 - `.agentic-sdlc/runs/<run-id>/approvals.jsonl`
 - `.agentic-sdlc/runs/<run-id>/events.jsonl`
+- `.agentic-sdlc/runs/<run-id>/agent-adapter.json`
 - `.agentic-sdlc/runs/<run-id>/changed-files.json`
 - `.agentic-sdlc/runs/<run-id>/diff.patch`
 - `.agentic-sdlc/runs/<run-id>/maven-output.txt`
@@ -121,12 +123,10 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Add a provider adapter interface:
-   - `interpret_requirement`
-   - `create_task_breakdown`
-   - `create_implementation_plan`
-   - `execute_approved_plan`
-   Start with a mock adapter, then Amp SDK adapter, then Copilot adapter.
+1. Add Amp SDK adapter behind the existing provider adapter interface:
+   - implement only one phase first, likely `interpret_requirement` or `create_implementation_plan`
+   - persist provider session/thread metadata
+   - keep execution gated and auditable
 2. Add a real persistence model option:
    - continue repo-local artifacts
    - optionally add SQLite for daemon run index/event querying

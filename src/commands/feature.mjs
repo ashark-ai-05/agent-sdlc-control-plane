@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve, relative } from 'node:path';
+import { join, resolve } from 'node:path';
+import { resolveAgentAdapter } from '../adapters/index.mjs';
 import { appendJsonl, loadOptionalText, readJson, requireFile, writeJson } from '../core/io.mjs';
 import { hasApproval } from '../core/approvals.mjs';
 import { git, run } from '../core/git.mjs';
 import { isProtectedBranch, loadPolicy } from '../core/policy.mjs';
-import { applyConfigChange, validateConfigFile } from '../core/config.mjs';
 import { chooseValidationCommands, scoreConfidence } from '../core/confidence.mjs';
 import { die, loadRun } from '../core/run-context.mjs';
 import { bulletList, fileListFromChangedFiles, firstLine, parseCsv, validationLines } from '../core/text.mjs';
@@ -56,13 +56,14 @@ export function featureExecute(args) {
   if (!checkout.ok) die(`failed to checkout working branch ${workingBranch}: ${checkout.stderr || checkout.stdout}`);
   appendJsonl(eventsPath, { type: 'working_branch_ready', fromBranch: currentBranch, workingBranch });
 
-  const absoluteTarget = resolve(root, targetFile);
-  const relativeTarget = relative(root, absoluteTarget);
-  if (relativeTarget.startsWith('..')) die('--target-file must stay inside repo');
-  applyConfigChange(absoluteTarget, setKey, setValue, runId);
-  const configValidation = validateConfigFile(absoluteTarget);
-  configValidation.file = relativeTarget;
+  const adapterName = args['agent-adapter'] || args.adapter || (args['mock-agent'] ? 'mock-agent' : manifest.agentAdapter || contextPack.agentAdapter || 'mock-agent');
+  const adapter = resolveAgentAdapter(String(adapterName));
+  const adapterResult = adapter.executeApprovedPlan({ root, runId, targetFile, setKey, setValue, manifest, contextPack });
+  const relativeTarget = adapterResult.targetFile;
+  const configValidation = adapterResult.configValidation;
+  writeJson(join(runDir, 'agent-adapter.json'), adapterResult);
   writeJson(join(runDir, 'config-validation.json'), configValidation);
+  appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterResult.provider, phase: adapterResult.phase, capabilities: adapterResult.capabilities });
   appendJsonl(eventsPath, { type: 'mock_config_change_applied', file: relativeTarget, key: setKey, value: setValue });
   appendJsonl(eventsPath, { type: 'config_validation_completed', ok: configValidation.ok, file: relativeTarget, errors: configValidation.errors });
 
@@ -96,12 +97,14 @@ export function featureExecute(args) {
     changedFiles: changed,
     validation: validationSummary,
     confidence,
+    adapter: adapterResult,
     artifacts: {
       changedFiles: join(runDir, 'changed-files.json'),
       diff: join(runDir, 'diff.patch'),
       mavenOutput: join(runDir, 'maven-output.txt'),
       validationSummary: join(runDir, 'validation-summary.json'),
       confidence: join(runDir, 'confidence.json'),
+      adapter: join(runDir, 'agent-adapter.json'),
     },
   }, null, 2));
 }

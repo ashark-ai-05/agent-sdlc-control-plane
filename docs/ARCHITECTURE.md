@@ -61,6 +61,9 @@ Main source and entrypoint:
 src/main.mjs                         thin public source entrypoint
 src/app.mjs                          thin command dispatcher
 src/cli/args.mjs                     CLI argument parsing
+src/adapters/types.mjs                provider adapter phase contract
+src/adapters/index.mjs                provider adapter resolver
+src/adapters/mock-agent.mjs           deterministic local mock execution adapter
 src/commands/feature.mjs             feature execution, PR preview/request, enterprise previews
 src/commands/run.mjs                 run init/list/status/audit-report commands
 src/commands/approval.mjs            approval gate commands
@@ -158,15 +161,14 @@ Real Stash/Jira/Confluence writes should only be added behind explicit configura
 Recommended next production hardening after this module split:
 
 ```text
-src/adapters/*.mjs         future agent/provider adapters
 src/providers/*.mjs        future Stash/Jira/Confluence clients behind approval gates
 src/policy/*.mjs           richer enterprise policy rules and violations
 src/testing/*.mjs          shared test fixture builders as tests grow
 ```
 
-The command handlers now live in `src/commands/`, daemon HTTP handling lives in `src/daemon/server.mjs`, and repo/run helpers live in `src/core/`.
+The command handlers now live in `src/commands/`, daemon HTTP handling lives in `src/daemon/server.mjs`, repo/run helpers live in `src/core/`, and provider execution is behind `src/adapters/`.
 
-Future provider adapter shape:
+Current provider adapter shape:
 
 ```text
 interpret_requirement
@@ -177,4 +179,4 @@ review_changes
 generate_update_previews
 ```
 
-Start with a mock adapter, then add Amp SDK, then Copilot or other providers.
+The first implemented adapter is `mock-agent`, which supports deterministic local config changes through `execute_approved_plan` and writes `agent-adapter.json` for auditability. Add Amp SDK, then Copilot or other providers behind this interface.

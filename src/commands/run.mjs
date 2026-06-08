@@ -81,6 +81,7 @@ export function artifactChecklist(runDir) {
     'context-pack.json',
     '../../policy.json',
     'approvals.jsonl',
+    'agent-adapter.json',
     'changed-files.json',
     'diff.patch',
     'maven-output.txt',
