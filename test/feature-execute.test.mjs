@@ -1,0 +1,227 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const cli = new URL('../bin/agent-sdlc.mjs', import.meta.url).pathname;
+
+function sh(cwd, command) {
+  const result = spawnSync(command, { cwd, shell: true, encoding: 'utf8' });
+  assert.equal(result.status, 0, `${command}\n${result.stdout}\n${result.stderr}`);
+  return result;
+}
+
+function makeRepo() {
+  const repo = mkdtempSync(join(tmpdir(), 'agent-sdlc-exec-'));
+  mkdirSync(join(repo, 'src/main/resources'), { recursive: true });
+  mkdirSync(join(repo, '.agentic-sdlc/runs/run-1'), { recursive: true });
+  writeFileSync(join(repo, 'src/main/resources/application.yml'), 'app:\n  name: demo\n');
+  writeFileSync(join(repo, '.agentic-sdlc/runs/run-1/manifest.json'), JSON.stringify({
+    manifestVersion: '0.1.0',
+    runId: 'run-1',
+    workingBranch: 'agent-sdlc/run-1',
+    validationCommands: ['node --version'],
+  }, null, 2));
+  writeFileSync(join(repo, '.agentic-sdlc/runs/run-1/context-pack.json'), JSON.stringify({
+    runId: 'run-1',
+    contextSufficiencyScore: 0.8,
+    unknowns: [],
+  }, null, 2));
+  writeFileSync(join(repo, '.agentic-sdlc/runs/run-1/approvals.jsonl'), JSON.stringify({ gate: 'implementation_plan', status: 'approved' }) + '\n');
+  sh(repo, 'git init -q && git config user.email test@example.com && git config user.name Test && git add src/main/resources/application.yml && git commit -q -m initial');
+  return repo;
+}
+
+test('feature execute applies controlled config change and persists artifacts', () => {
+  const repo = makeRepo();
+  const result = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_pr_approval');
+  assert.deepEqual(payload.changedFiles, ['src/main/resources/application.yml']);
+  assert.equal(payload.validation.ok, true);
+  assert.equal(payload.confidence.rating, 'high');
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(repo, 'src/main/resources/application.yml'), 'utf8'), /feature\.enabled: true/);
+  assert.match(readFileSync(join(runDir, 'diff.patch'), 'utf8'), /agent-sdlc mock config change/);
+  assert.ok(existsSync(join(runDir, 'changed-files.json')));
+  assert.ok(existsSync(join(runDir, 'maven-output.txt')));
+  assert.ok(existsSync(join(runDir, 'validation-summary.json')));
+  assert.ok(existsSync(join(runDir, 'confidence.json')));
+});
+
+test('feature pr-preview generates PR preview artifacts without creating a PR', () => {
+  const repo = makeRepo();
+  const execute = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
+  assert.equal(execute.status, 0, execute.stderr || execute.stdout);
+
+  const result = spawnSync('node', [cli, 'feature', 'pr-preview', '--repo', repo, '--run', 'run-1'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_pr_approval');
+  assert.match(payload.title, /agent-sdlc/);
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'pr-title.txt'), 'utf8'), /feature config change/);
+  assert.match(readFileSync(join(runDir, 'pr-body.md'), 'utf8'), /Changed files/);
+  assert.match(readFileSync(join(runDir, 'review-checklist.md'), 'utf8'), /Approve or reject the `pr_creation` gate/);
+  assert.match(readFileSync(join(runDir, 'pr-preview.md'), 'utf8'), /PR Preview/);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /pr_preview_generated/);
+});
+
+function executeAndPreview(repo) {
+  const execute = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
+  assert.equal(execute.status, 0, execute.stderr || execute.stdout);
+  const preview = spawnSync('node', [cli, 'feature', 'pr-preview', '--repo', repo, '--run', 'run-1'], { encoding: 'utf8' });
+  assert.equal(preview.status, 0, preview.stderr || preview.stdout);
+}
+
+function executePreviewAndCreatePr(repo) {
+  executeAndPreview(repo);
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  appendFileSync(join(runDir, 'approvals.jsonl'), JSON.stringify({ gate: 'pr_creation', status: 'approved', actor: 'test' }) + '\n');
+  const createPr = spawnSync('node', [cli, 'feature', 'create-pr', '--repo', repo, '--run', 'run-1', '--provider', 'stash', '--dry-run'], { encoding: 'utf8' });
+  assert.equal(createPr.status, 0, createPr.stderr || createPr.stdout);
+}
+
+function executePreviewCreatePrAndEnterprisePreview(repo) {
+  executePreviewAndCreatePr(repo);
+  const enterprisePreview = spawnSync('node', [cli, 'feature', 'enterprise-preview', '--repo', repo, '--run', 'run-1', '--jira-key', 'ABC-123', '--confluence-page-id', '98765'], { encoding: 'utf8' });
+  assert.equal(enterprisePreview.status, 0, enterprisePreview.stderr || enterprisePreview.stdout);
+}
+
+test('feature create-pr requires pr_creation approval', () => {
+  const repo = makeRepo();
+  executeAndPreview(repo);
+
+  const result = spawnSync('node', [cli, 'feature', 'create-pr', '--repo', repo, '--run', 'run-1', '--provider', 'stash', '--dry-run'], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /pr_creation approval missing/);
+});
+
+test('feature create-pr writes stash request after approval', () => {
+  const repo = makeRepo();
+  executeAndPreview(repo);
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  appendFileSync(join(runDir, 'approvals.jsonl'), JSON.stringify({ gate: 'pr_creation', status: 'approved', actor: 'test' }) + '\n');
+
+  const result = spawnSync('node', [cli, 'feature', 'create-pr', '--repo', repo, '--run', 'run-1', '--provider', 'stash', '--dry-run'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'pr_creation_request_ready');
+  assert.equal(payload.provider, 'stash');
+  assert.equal(payload.dryRun, true);
+  assert.equal(payload.sourceBranch, 'agent-sdlc/run-1');
+
+  const request = JSON.parse(readFileSync(join(runDir, 'stash-create-pr-request.json'), 'utf8'));
+  assert.equal(request.title, '[agent-sdlc] feature config change (run-1)');
+  assert.equal(request.sourceBranch, 'agent-sdlc/run-1');
+  assert.equal(request.targetBranch, 'main');
+  assert.equal(request.policy.prCreationApprovalPresent, true);
+  assert.deepEqual(request.changedFiles, ['src/main/resources/application.yml']);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /create_pr_request_generated/);
+});
+
+test('feature enterprise-preview generates Jira and Confluence update previews', () => {
+  const repo = makeRepo();
+  executePreviewAndCreatePr(repo);
+
+  const result = spawnSync('node', [cli, 'feature', 'enterprise-preview', '--repo', repo, '--run', 'run-1', '--jira-key', 'ABC-123', '--confluence-page-id', '98765'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_enterprise_update_approval');
+  assert.equal(payload.approvalGate, 'enterprise_update');
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'jira-update-preview.md'), 'utf8'), /Issue: ABC-123/);
+  assert.match(readFileSync(join(runDir, 'confluence-update-preview.md'), 'utf8'), /Page: 98765/);
+  assert.match(readFileSync(join(runDir, 'jira-update-preview.md'), 'utf8'), /enterprise_update/);
+  const request = JSON.parse(readFileSync(join(runDir, 'enterprise-update-request.json'), 'utf8'));
+  assert.equal(request.state, 'waiting_enterprise_update_approval');
+  assert.equal(request.jira.issueKey, 'ABC-123');
+  assert.equal(request.confluence.pageId, '98765');
+  assert.equal(request.policy.writeJiraNow, false);
+  assert.equal(request.policy.writeConfluenceNow, false);
+  assert.deepEqual(request.inputs.changedFiles, ['src/main/resources/application.yml']);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /enterprise_update_preview_generated/);
+});
+
+test('feature apply-enterprise-updates requires enterprise_update approval', () => {
+  const repo = makeRepo();
+  executePreviewCreatePrAndEnterprisePreview(repo);
+
+  const result = spawnSync('node', [cli, 'feature', 'apply-enterprise-updates', '--repo', repo, '--run', 'run-1', '--dry-run'], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /enterprise_update approval missing/);
+});
+
+test('feature apply-enterprise-updates writes Jira and Confluence apply requests after approval', () => {
+  const repo = makeRepo();
+  executePreviewCreatePrAndEnterprisePreview(repo);
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  appendFileSync(join(runDir, 'approvals.jsonl'), JSON.stringify({ gate: 'enterprise_update', status: 'approved', actor: 'test' }) + '\n');
+
+  const result = spawnSync('node', [cli, 'feature', 'apply-enterprise-updates', '--repo', repo, '--run', 'run-1', '--dry-run'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'enterprise_update_apply_requests_ready');
+  assert.equal(payload.dryRun, true);
+
+  const jira = JSON.parse(readFileSync(join(runDir, 'jira-update-apply-request.json'), 'utf8'));
+  const confluence = JSON.parse(readFileSync(join(runDir, 'confluence-update-apply-request.json'), 'utf8'));
+  assert.equal(jira.provider, 'jira');
+  assert.equal(jira.issueKey, 'ABC-123');
+  assert.equal(jira.policy.enterpriseUpdateApprovalPresent, true);
+  assert.equal(jira.policy.dryRunOnly, true);
+  assert.equal(confluence.provider, 'confluence');
+  assert.equal(confluence.pageId, '98765');
+  assert.equal(confluence.policy.enterpriseUpdateApprovalPresent, true);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /enterprise_update_apply_requests_generated/);
+});
+
+test('run status summarizes state, gates, artifacts, validation, confidence, and next command', () => {
+  const repo = makeRepo();
+  executePreviewCreatePrAndEnterprisePreview(repo);
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  appendFileSync(join(runDir, 'approvals.jsonl'), JSON.stringify({ gate: 'enterprise_update', status: 'approved', actor: 'test' }) + '\n');
+
+  const result = spawnSync('node', [cli, 'run', 'status', '--repo', repo, '--run', 'run-1', '--json'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const status = JSON.parse(result.stdout);
+  assert.equal(status.state, 'ready_to_apply_enterprise_updates');
+  assert.deepEqual(status.gates.approved.sort(), ['enterprise_update', 'execution', 'implementation_plan', 'pr_creation'].sort());
+  assert.equal(status.validation.ok, true);
+  assert.equal(status.confidence.rating, 'high');
+  assert.deepEqual(status.changedFiles, ['src/main/resources/application.yml']);
+  assert.ok(status.artifacts.some((item) => item.name === 'enterprise-update-request.json' && item.present));
+  assert.match(status.nextRecommendedCommand, /apply-enterprise-updates/);
+
+  const textResult = spawnSync('node', [cli, 'run', 'status', '--repo', repo, '--run', 'run-1'], { encoding: 'utf8' });
+  assert.equal(textResult.status, 0, textResult.stderr || textResult.stdout);
+  assert.match(textResult.stdout, /State: ready_to_apply_enterprise_updates/);
+  assert.match(textResult.stdout, /Next: agent-sdlc feature apply-enterprise-updates/);
+});
+
+test('approval commands list, approve, and reject gates with latest-state semantics', () => {
+  const repo = makeRepo();
+  const approve = spawnSync('node', [cli, 'approval', 'approve', '--repo', repo, '--run', 'run-1', '--gate', 'execution', '--actor', 'tester', '--reason', 'safe demo'], { encoding: 'utf8' });
+  assert.equal(approve.status, 0, approve.stderr || approve.stdout);
+  assert.equal(JSON.parse(approve.stdout).status, 'approved');
+
+  const reject = spawnSync('node', [cli, 'approval', 'reject', '--repo', repo, '--run', 'run-1', '--gate', 'execution', '--actor', 'tester', '--reason', 'changed mind'], { encoding: 'utf8' });
+  assert.equal(reject.status, 0, reject.stderr || reject.stdout);
+  assert.equal(JSON.parse(reject.stdout).status, 'rejected');
+
+  const list = spawnSync('node', [cli, 'approval', 'list', '--repo', repo, '--run', 'run-1', '--json'], { encoding: 'utf8' });
+  assert.equal(list.status, 0, list.stderr || list.stdout);
+  const payload = JSON.parse(list.stdout);
+  assert.equal(payload.latestByGate.execution.status, 'rejected');
+  assert.deepEqual(payload.approvedGates, ['implementation_plan']);
+
+  const status = spawnSync('node', [cli, 'run', 'status', '--repo', repo, '--run', 'run-1', '--json'], { encoding: 'utf8' });
+  assert.equal(status.status, 0, status.stderr || status.stdout);
+  assert.equal(JSON.parse(status.stdout).state, 'waiting_execution_approval');
+});

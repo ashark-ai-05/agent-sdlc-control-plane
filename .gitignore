@@ -1,0 +1,4 @@
+node_modules/
+demo-repo/
+.agentic-sdlc/
+.DS_Store

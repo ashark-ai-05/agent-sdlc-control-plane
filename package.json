@@ -1,0 +1,17 @@
+{
+  "name": "agent-sdlc",
+  "version": "0.1.0",
+  "description": "Local-first Agentic SDLC workflow control CLI",
+  "type": "module",
+  "bin": {
+    "agent-sdlc": "./bin/agent-sdlc.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "demo": "node ./bin/agent-sdlc.mjs feature execute --repo ./demo-repo --run demo-run --target-file src/main/resources/application.yml --set-key feature.enabled --set-value true --mock-agent --auto-approve"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
