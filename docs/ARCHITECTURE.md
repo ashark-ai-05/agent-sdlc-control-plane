@@ -58,8 +58,16 @@ request
 Main source and entrypoint:
 
 ```text
-src/main.mjs          current implementation source
-bin/agent-sdlc.mjs   thin executable entrypoint
+src/main.mjs                         thin public source entrypoint
+src/app.mjs                          application command dispatcher/orchestrator
+src/cli/args.mjs                     CLI argument parsing
+src/core/io.mjs                      JSON/text artifact IO helpers
+src/core/git.mjs                     git and shell command wrappers
+src/core/policy.mjs                  policy defaults/loading/validation
+src/core/approvals.mjs               approval JSONL semantics
+src/core/config.mjs                  config editing and validation helpers
+src/daemon/mission-control-html.mjs  standalone mission-control HTML
+bin/agent-sdlc.mjs                   thin executable entrypoint
 ```
 
 Implements repo scan, config validation, policy validation, run initialization, approvals, controlled execution, PR preview, PR request dry-run, enterprise previews, audit report, and local daemon startup.
@@ -138,18 +146,13 @@ Real Stash/Jira/Confluence writes should only be added behind explicit configura
 
 ## Future architecture direction
 
-Recommended next module split after the initial `src/main.mjs` extraction:
+Recommended next module split after this production-layout pass:
 
 ```text
-bin/agent-sdlc.mjs          thin CLI entrypoint
-src/cli/args.mjs           argument parsing
-src/core/git.mjs           git wrapper
-src/core/runs.mjs          run state + status
-src/core/approvals.mjs     approval JSONL semantics
-src/core/artifacts.mjs     artifact reads/writes
-src/core/policy.mjs        policy loading/validation
-src/commands/*.mjs         command handlers
-src/daemon/server.mjs      daemon and UI
+src/commands/*.mjs         command handlers currently still grouped in src/app.mjs
+src/daemon/server.mjs      daemon server currently still grouped in src/app.mjs
+src/core/runs.mjs          run state + status currently still grouped in src/app.mjs
+src/core/artifacts.mjs     artifact checklist/report helpers currently still grouped in src/app.mjs
 src/adapters/*.mjs         future agent/provider adapters
 ```
 

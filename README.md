@@ -5,8 +5,16 @@ Local-first Agentic SDLC workflow control CLI.
 Source code layout:
 
 ```text
-src/main.mjs          # current implementation source
-bin/agent-sdlc.mjs   # thin executable entrypoint
+src/main.mjs                         # thin public source entrypoint
+src/app.mjs                          # application command dispatcher/orchestrator
+src/cli/args.mjs                     # CLI argument parsing
+src/core/io.mjs                      # JSON/text artifact IO helpers
+src/core/git.mjs                     # git and shell command wrappers
+src/core/policy.mjs                  # policy defaults/loading/validation
+src/core/approvals.mjs               # approval JSONL semantics
+src/core/config.mjs                  # config editing and validation helpers
+src/daemon/mission-control-html.mjs  # standalone mission-control HTML
+bin/agent-sdlc.mjs                   # thin executable entrypoint
 ```
 
 Handoff docs for continuing on another PC:

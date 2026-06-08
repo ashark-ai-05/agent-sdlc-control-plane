@@ -329,11 +329,25 @@ function waitForDaemon(child) {
   });
 }
 
-test('source code lives under src and bin is a thin entrypoint', () => {
-  assert.ok(existsSync(new URL('../src/main.mjs', import.meta.url).pathname));
+test('source code uses production module directories and thin entrypoints', () => {
+  const requiredModules = [
+    '../src/main.mjs',
+    '../src/cli/args.mjs',
+    '../src/core/io.mjs',
+    '../src/core/git.mjs',
+    '../src/core/policy.mjs',
+    '../src/core/approvals.mjs',
+    '../src/core/config.mjs',
+    '../src/daemon/mission-control-html.mjs',
+  ];
+  for (const modulePath of requiredModules) {
+    assert.ok(existsSync(new URL(modulePath, import.meta.url).pathname), `${modulePath} should exist`);
+  }
   const bin = readFileSync(cli, 'utf8');
   assert.match(bin, /from '\.\.\/src\/main\.mjs'/);
   assert.ok(bin.length < 500, 'bin entrypoint should stay thin; implementation belongs in src/');
+  const main = readFileSync(new URL('../src/main.mjs', import.meta.url), 'utf8');
+  assert.ok(main.length < 20000, 'src/main.mjs should not be a monolith; extract reusable modules');
 });
 
 test('daemon serves mission-control UI, status API, artifacts, and approval updates', async () => {

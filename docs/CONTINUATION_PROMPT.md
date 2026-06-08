@@ -26,7 +26,9 @@ Important design stance:
 - mission-control UI is local-only by default: `127.0.0.1`
 
 What already exists:
-- Source implementation in `src/main.mjs`
+- Thin source entrypoint in `src/main.mjs`
+- Application dispatcher/orchestrator in `src/app.mjs`
+- Reusable modules in `src/cli/`, `src/core/`, and `src/daemon/`
 - Thin executable entrypoint in `bin/agent-sdlc.mjs`
 - Tests in `test/feature-execute.test.mjs`
 - No runtime dependencies beyond Node >=20 and git
@@ -117,16 +119,13 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Split `src/main.mjs` into smaller modules:
-   - `src/cli/args.mjs`
-   - `src/core/git.mjs`
-   - `src/core/runs.mjs`
-   - `src/core/approvals.mjs`
-   - `src/core/artifacts.mjs`
-   - `src/core/policy.mjs`
+1. Continue splitting `src/app.mjs` into smaller modules:
    - `src/commands/*.mjs`
    - `src/daemon/server.mjs`
-   Keep `bin/agent-sdlc.mjs` as a thin entrypoint.
+   - `src/core/runs.mjs`
+   - `src/core/artifacts.mjs`
+   - `src/core/repo-scan.mjs`
+   Keep `src/main.mjs` and `bin/agent-sdlc.mjs` as thin entrypoints.
 2. Add a real persistence model option:
    - continue repo-local artifacts
    - optionally add SQLite for daemon run index/event querying
