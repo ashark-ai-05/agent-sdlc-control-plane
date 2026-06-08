@@ -6,13 +6,22 @@ Source code layout:
 
 ```text
 src/main.mjs                         # thin public source entrypoint
-src/app.mjs                          # application command dispatcher/orchestrator
+src/app.mjs                          # thin application command dispatcher
 src/cli/args.mjs                     # CLI argument parsing
+src/commands/feature.mjs             # feature execution, PR preview/request, enterprise previews
+src/commands/run.mjs                 # run init/list/status/audit-report commands
+src/commands/approval.mjs            # approval gate commands
+src/commands/safety.mjs              # repo scan, policy validation, config validation commands
 src/core/io.mjs                      # JSON/text artifact IO helpers
 src/core/git.mjs                     # git and shell command wrappers
 src/core/policy.mjs                  # policy defaults/loading/validation
 src/core/approvals.mjs               # approval JSONL semantics
 src/core/config.mjs                  # config editing and validation helpers
+src/core/confidence.mjs              # validation command selection and confidence scoring
+src/core/repo.mjs                    # repo scanning, stack detection, config file discovery
+src/core/run-context.mjs             # run loading, run discovery, CLI failure helper
+src/core/text.mjs                    # text/list formatting helpers
+src/daemon/server.mjs                # local mission-control HTTP API/server
 src/daemon/mission-control-html.mjs  # standalone mission-control HTML
 bin/agent-sdlc.mjs                   # thin executable entrypoint
 ```

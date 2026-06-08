@@ -338,7 +338,16 @@ test('source code uses production module directories and thin entrypoints', () =
     '../src/core/policy.mjs',
     '../src/core/approvals.mjs',
     '../src/core/config.mjs',
+    '../src/core/confidence.mjs',
+    '../src/core/repo.mjs',
+    '../src/core/run-context.mjs',
+    '../src/core/text.mjs',
+    '../src/commands/feature.mjs',
+    '../src/commands/run.mjs',
+    '../src/commands/approval.mjs',
+    '../src/commands/safety.mjs',
     '../src/daemon/mission-control-html.mjs',
+    '../src/daemon/server.mjs',
   ];
   for (const modulePath of requiredModules) {
     assert.ok(existsSync(new URL(modulePath, import.meta.url).pathname), `${modulePath} should exist`);
@@ -346,8 +355,8 @@ test('source code uses production module directories and thin entrypoints', () =
   const bin = readFileSync(cli, 'utf8');
   assert.match(bin, /from '\.\.\/src\/main\.mjs'/);
   assert.ok(bin.length < 500, 'bin entrypoint should stay thin; implementation belongs in src/');
-  const main = readFileSync(new URL('../src/main.mjs', import.meta.url), 'utf8');
-  assert.ok(main.length < 20000, 'src/main.mjs should not be a monolith; extract reusable modules');
+  const app = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
+  assert.ok(app.length < 12000, 'src/app.mjs should stay as the dispatcher; command implementations belong in src/commands/');
 });
 
 test('daemon serves mission-control UI, status API, artifacts, and approval updates', async () => {

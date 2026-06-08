@@ -27,8 +27,10 @@ Important design stance:
 
 What already exists:
 - Thin source entrypoint in `src/main.mjs`
-- Application dispatcher/orchestrator in `src/app.mjs`
-- Reusable modules in `src/cli/`, `src/core/`, and `src/daemon/`
+- Thin command dispatcher in `src/app.mjs`
+- Command handlers in `src/commands/`
+- Core helpers in `src/core/`
+- Local daemon server and UI modules in `src/daemon/`
 - Thin executable entrypoint in `bin/agent-sdlc.mjs`
 - Tests in `test/feature-execute.test.mjs`
 - No runtime dependencies beyond Node >=20 and git
@@ -119,43 +121,36 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Continue splitting `src/app.mjs` into smaller modules:
-   - `src/commands/*.mjs`
-   - `src/daemon/server.mjs`
-   - `src/core/runs.mjs`
-   - `src/core/artifacts.mjs`
-   - `src/core/repo-scan.mjs`
-   Keep `src/main.mjs` and `bin/agent-sdlc.mjs` as thin entrypoints.
-2. Add a real persistence model option:
-   - continue repo-local artifacts
-   - optionally add SQLite for daemon run index/event querying
-3. Add first provider adapter interface:
+1. Add a provider adapter interface:
    - `interpret_requirement`
    - `create_task_breakdown`
    - `create_implementation_plan`
    - `execute_approved_plan`
    Start with a mock adapter, then Amp SDK adapter, then Copilot adapter.
-4. Add real Stash/Bitbucket integration behind explicit config and approval:
+2. Add a real persistence model option:
+   - continue repo-local artifacts
+   - optionally add SQLite for daemon run index/event querying
+3. Add real Stash/Bitbucket integration behind explicit config and approval:
    - server URL
    - auth via environment variable only
    - projectKey/repoSlug/reviewers
    - create PR only after `pr_creation`
    - never merge
-5. Add Jira/Confluence integration behind explicit config and approval:
+4. Add Jira/Confluence integration behind explicit config and approval:
    - preview first
    - write only after `enterprise_update`
    - auth via environment variable only
-6. Add better validation:
+5. Add better validation:
    - real YAML parser if dependency policy allows
    - module-aware Maven/Gradle/npm validation
    - policy check command that blocks unsafe state
-7. Improve mission-control UI:
+6. Improve mission-control UI:
    - forms for `run init`
    - forms for PR provider fields
    - forms for enterprise preview fields
    - event timeline
    - confidence/risk visualization
-8. Add architecture docs and ADRs before wiring real enterprise writes.
+7. Add architecture docs and ADRs before wiring real enterprise writes.
 
 When continuing, always:
 - run `git status --short --branch` first

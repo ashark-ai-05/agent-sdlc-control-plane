@@ -59,13 +59,22 @@ Main source and entrypoint:
 
 ```text
 src/main.mjs                         thin public source entrypoint
-src/app.mjs                          application command dispatcher/orchestrator
+src/app.mjs                          thin command dispatcher
 src/cli/args.mjs                     CLI argument parsing
+src/commands/feature.mjs             feature execution, PR preview/request, enterprise previews
+src/commands/run.mjs                 run init/list/status/audit-report commands
+src/commands/approval.mjs            approval gate commands
+src/commands/safety.mjs              repo scan, policy validation, config validation commands
 src/core/io.mjs                      JSON/text artifact IO helpers
 src/core/git.mjs                     git and shell command wrappers
 src/core/policy.mjs                  policy defaults/loading/validation
 src/core/approvals.mjs               approval JSONL semantics
 src/core/config.mjs                  config editing and validation helpers
+src/core/confidence.mjs              validation command selection and confidence scoring
+src/core/repo.mjs                    repo scanning, stack detection, config file discovery
+src/core/run-context.mjs             run loading, run discovery, CLI failure helper
+src/core/text.mjs                    text/list formatting helpers
+src/daemon/server.mjs                local mission-control HTTP API/server
 src/daemon/mission-control-html.mjs  standalone mission-control HTML
 bin/agent-sdlc.mjs                   thin executable entrypoint
 ```
@@ -146,15 +155,16 @@ Real Stash/Jira/Confluence writes should only be added behind explicit configura
 
 ## Future architecture direction
 
-Recommended next module split after this production-layout pass:
+Recommended next production hardening after this module split:
 
 ```text
-src/commands/*.mjs         command handlers currently still grouped in src/app.mjs
-src/daemon/server.mjs      daemon server currently still grouped in src/app.mjs
-src/core/runs.mjs          run state + status currently still grouped in src/app.mjs
-src/core/artifacts.mjs     artifact checklist/report helpers currently still grouped in src/app.mjs
 src/adapters/*.mjs         future agent/provider adapters
+src/providers/*.mjs        future Stash/Jira/Confluence clients behind approval gates
+src/policy/*.mjs           richer enterprise policy rules and violations
+src/testing/*.mjs          shared test fixture builders as tests grow
 ```
+
+The command handlers now live in `src/commands/`, daemon HTTP handling lives in `src/daemon/server.mjs`, and repo/run helpers live in `src/core/`.
 
 Future provider adapter shape:
 
