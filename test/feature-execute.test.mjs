@@ -247,3 +247,17 @@ test('run init scaffolds manifest and context pack with validation detection', (
   assert.ok(existsSync(join(runDir, 'approvals.jsonl')));
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /run_initialized/);
 });
+
+test('run audit-report writes markdown audit report', () => {
+  const repo = makeRepo();
+  executePreviewCreatePrAndEnterprisePreview(repo);
+  const result = spawnSync('node', [cli, 'run', 'audit-report', '--repo', repo, '--run', 'run-1'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_enterprise_update_approval');
+  const report = readFileSync(join(repo, '.agentic-sdlc/runs/run-1/audit-report.md'), 'utf8');
+  assert.match(report, /# Agent SDLC audit report/);
+  assert.match(report, /## Gates/);
+  assert.match(report, /## Artifact checklist/);
+  assert.match(report, /## Event timeline/);
+});

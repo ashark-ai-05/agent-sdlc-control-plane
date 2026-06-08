@@ -45,6 +45,10 @@ agent-sdlc run status \
   --run <run-id> \
   --json
 
+agent-sdlc run audit-report \
+  --repo /path/to/repo \
+  --run <run-id>
+
 agent-sdlc approval list \
   --repo /path/to/repo \
   --run <run-id> \
@@ -146,3 +150,5 @@ Enterprise apply request artifacts:
 The `run status` command provides a mission-control-friendly snapshot of one run: inferred state, approved/missing gates, artifact checklist, validation status, confidence score, changed files, and the next recommended command. Use `--json` for UI/API consumption.
 
 The `approval` commands manage `approvals.jsonl` without manual editing. Latest record wins per gate, so a later reject supersedes an earlier approve.
+
+The `run audit-report` command writes `audit-report.md` with run metadata, gate history, validation, confidence, changed files, artifact checklist, and event timeline.

@@ -781,6 +781,7 @@ function artifactChecklist(runDir) {
     'enterprise-update-request.json',
     'jira-update-apply-request.json',
     'confluence-update-apply-request.json',
+    'audit-report.md',
     'events.jsonl',
   ];
   return names.map((name) => ({ name, present: existsSync(join(runDir, name)) }));
@@ -872,6 +873,32 @@ function runStatus(args) {
   console.log(`Next: ${nextRecommendedCommand}`);
 }
 
+function runAuditReport(args) {
+  const repo = resolve(String(args.repo || ''));
+  const runId = String(args.run || '');
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  if (!runId) die('--run is required');
+
+  const { root, runDir, approvalPath, manifest, contextPack } = loadRun(repo, runId);
+  const approvalRecords = approvals(approvalPath);
+  const validationSummary = readJson(join(runDir, 'validation-summary.json'), {});
+  const confidence = readJson(join(runDir, 'confidence.json'), {});
+  const changedFiles = fileListFromChangedFiles(readJson(join(runDir, 'changed-files.json'), {}));
+  const events = existsSync(join(runDir, 'events.jsonl'))
+    ? readFileSync(join(runDir, 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    : [];
+  const artifacts = artifactChecklist(runDir);
+  const approved = approvedGates(approvalPath);
+  const state = inferState({ artifacts, approvalsPresent: approved, validationSummary });
+
+  const report = `# Agent SDLC audit report\n\n## Run\n\n- Run ID: \`${runId}\`\n- Repo: \`${root}\`\n- State: \`${state}\`\n- Workflow: \`${manifest.workflowType || contextPack.workflowType || 'unknown'}\`\n- Working branch: \`${manifest.workingBranch || 'unknown'}\`\n- Base branch: \`${manifest.baseBranch || contextPack.baseBranch || 'unknown'}\`\n\n## Gates\n\n${approvalRecords.length ? approvalRecords.map((record) => `- ${record.timestamp || '-'} — ${record.gate}: ${record.status} (${record.actor || 'unknown'}${record.reason ? `; ${record.reason}` : ''})`).join('\n') : '- no approval records'}\n\n## Validation\n\n- Status: ${validationSummary.ok === true ? 'passed' : validationSummary.ok === false ? 'failed' : 'not run'}\n${Array.isArray(validationSummary.commands) ? validationSummary.commands.map((cmd) => `- ${cmd.command}: ${cmd.ok ? 'PASS' : 'FAIL'} (exit ${cmd.status})`).join('\n') : ''}\n\n## Confidence\n\n- Overall: ${confidence.overallConfidence ?? 'not scored'}\n- Rating: ${confidence.rating || 'not_scored'}\n\nRisk factors:\n${bulletList(confidence.riskFactors)}\n\nReview focus:\n${bulletList(confidence.recommendedHumanReviewFocus)}\n\n## Changed files\n\n${bulletList(changedFiles)}\n\n## Artifact checklist\n\n${artifacts.map((item) => `- [${item.present ? 'x' : ' '}] ${item.name}`).join('\n')}\n\n## Event timeline\n\n${events.length ? events.map((event) => `- ${event.timestamp || '-'} — ${event.type || 'event'}${event.gate ? ` (${event.gate})` : ''}`).join('\n') : '- no events'}\n`;
+
+  const reportPath = join(runDir, 'audit-report.md');
+  writeFileSync(reportPath, report);
+  appendJsonl(join(runDir, 'events.jsonl'), { type: 'audit_report_generated', runId, reportPath });
+  console.log(JSON.stringify({ runId, repo: root, state, reportPath }, null, 2));
+}
+
 function approvalCommand(args, action) {
   const repo = resolve(String(args.repo || ''));
   const runId = String(args.run || '');
@@ -934,7 +961,7 @@ function approvalCommand(args, action) {
 }
 
 function usage() {
-  console.log(`Usage:\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
+  console.log(`Usage:\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -946,6 +973,7 @@ else if (domain === 'feature' && action === 'create-pr') featureCreatePr(args);
 else if (domain === 'feature' && action === 'enterprise-preview') featureEnterprisePreview(args);
 else if (domain === 'feature' && action === 'apply-enterprise-updates') featureApplyEnterpriseUpdates(args);
 else if (domain === 'run' && action === 'status') runStatus(args);
+else if (domain === 'run' && action === 'audit-report') runAuditReport(args);
 else if (domain === 'approval' && ['list', 'approve', 'reject'].includes(action)) approvalCommand(args, action);
 else {
   usage();
