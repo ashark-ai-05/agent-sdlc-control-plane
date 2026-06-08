@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent SDLC Control Plane Architecture</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+    :root { --bg:#020617; --panel:#0f172a; --text:#e2e8f0; --muted:#94a3b8; --grid:#1e293b; }
+    * { box-sizing: border-box; }
+    body { margin:0; background: radial-gradient(circle at 15% 0%, rgba(37,99,235,.22), transparent 32rem), var(--bg); color:var(--text); font-family:'JetBrains Mono', monospace; }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 28px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+    h1 { font-size: 24px; margin:0; letter-spacing:-.03em; }
+    .subtitle { color:var(--muted); font-size: 12px; margin-top:8px; }
+    .dot { width:10px; height:10px; background:#34d399; border-radius:999px; box-shadow:0 0 18px #34d399; animation:pulse 1.8s infinite; }
+    @keyframes pulse { 0%,100%{opacity:.55; transform:scale(.95)} 50%{opacity:1; transform:scale(1.15)} }
+    .diagram-card { border:1px solid #334155; border-radius:18px; background:rgba(15,23,42,.72); overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.35); }
+    svg { width:100%; height:auto; display:block; }
+    .cards { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:18px; }
+    .card { border:1px solid #334155; border-radius:14px; background:rgba(15,23,42,.74); padding:16px; }
+    .card h3 { margin:0 0 10px; font-size:13px; }
+    .card ul { margin:0; padding:0; list-style:none; color:var(--muted); font-size:11px; line-height:1.7; }
+    .legend { display:flex; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:10px; }
+    .legend span { display:inline-flex; align-items:center; gap:6px; }
+    .sw { width:10px; height:10px; border-radius:3px; display:inline-block; }
+    footer { color:var(--muted); font-size:10px; margin-top:14px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Agent SDLC Control Plane — Local-First Architecture</h1>
+      <div class="subtitle">Workflow control plane around replaceable agent execution providers; repo-local run state, approval gates, validation, confidence, audit, and mission control.</div>
+    </div>
+    <div class="dot" title="local daemon"></div>
+  </header>
+
+  <div class="diagram-card">
+    <svg viewBox="0 0 1240 860" role="img" aria-label="Agent SDLC local-first architecture diagram">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+        </pattern>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+        </marker>
+        <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L9,3 z" fill="#34d399" />
+        </marker>
+        <marker id="arrowRose" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L9,3 z" fill="#fb7185" />
+        </marker>
+        <style>
+          .label{font:700 13px 'JetBrains Mono',monospace; fill:#e2e8f0}.sub{font:500 9px 'JetBrains Mono',monospace; fill:#94a3b8}.tiny{font:500 8px 'JetBrains Mono',monospace; fill:#94a3b8}.boundary{fill:rgba(15,23,42,.24);stroke:#fbbf24;stroke-width:1.5;stroke-dasharray:8 4}.security{fill:rgba(136,19,55,.16);stroke:#fb7185;stroke-width:1.2;stroke-dasharray:4 4}.flow{stroke:#64748b;stroke-width:1.6;fill:none;marker-end:url(#arrow)}.flowg{stroke:#34d399;stroke-width:1.8;fill:none;marker-end:url(#arrowGreen)}.flowr{stroke:#fb7185;stroke-width:1.5;fill:none;stroke-dasharray:5 4;marker-end:url(#arrowRose)}
+        </style>
+      </defs>
+      <rect width="1240" height="860" fill="#020617"/>
+      <rect width="1240" height="860" fill="url(#grid)" opacity=".9"/>
+
+      <!-- boundary boxes -->
+      <rect x="35" y="40" width="1170" height="700" rx="14" class="boundary"/>
+      <text x="52" y="65" class="tiny" fill="#fbbf24">developer machine / local-first runtime</text>
+      <rect x="55" y="450" width="1090" height="195" rx="12" class="security"/>
+      <text x="72" y="473" class="tiny" fill="#fb7185">repo-local safety boundary: artifacts, policy, approvals, audit logs</text>
+
+      <!-- arrows behind boxes -->
+      <path class="flowg" d="M170 180 C235 180 245 180 300 180"/>
+      <path class="flowg" d="M470 180 C520 180 530 180 575 180"/>
+      <path class="flow" d="M735 180 C775 180 790 180 830 180"/>
+      <path class="flow" d="M640 230 L640 305"/>
+      <path class="flow" d="M640 390 L640 455"/>
+      <path class="flow" d="M320 230 C320 300 320 332 365 340"/>
+      <path class="flow" d="M900 230 C900 315 858 340 815 340"/>
+      <path class="flowr" d="M285 520 C235 520 220 425 285 365"/>
+      <path class="flowr" d="M890 520 C965 500 975 415 940 365"/>
+      <path class="flow" d="M640 610 L640 700"/>
+      <path class="flow" d="M755 520 C865 520 900 575 990 575"/>
+      <path class="flow" d="M525 520 C425 520 390 575 280 575"/>
+
+      <!-- UI/entry -->
+      <g>
+        <rect x="70" y="135" width="150" height="90" rx="8" fill="#0f172a"/>
+        <rect x="70" y="135" width="150" height="90" rx="8" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="92" y="162" class="label">CLI</text>
+        <text x="92" y="180" class="sub">agent-sdlc commands</text>
+        <text x="92" y="198" class="sub">run/feature/approval</text>
+      </g>
+      <g>
+        <rect x="260" y="135" width="210" height="90" rx="8" fill="#0f172a"/>
+        <rect x="260" y="135" width="210" height="90" rx="8" fill="rgba(8,51,68,.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="284" y="162" class="label">Mission Control UI</text>
+        <text x="284" y="180" class="sub">localhost web operator</text>
+        <text x="284" y="198" class="sub">approve + trigger safe actions</text>
+      </g>
+      <g>
+        <rect x="575" y="125" width="190" height="110" rx="8" fill="#0f172a"/>
+        <rect x="575" y="125" width="190" height="110" rx="8" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="602" y="153" class="label">Local Daemon</text>
+        <text x="602" y="172" class="sub">127.0.0.1 HTTP API</text>
+        <text x="602" y="190" class="sub">/api/runs, /actions</text>
+        <text x="602" y="208" class="sub">artifact serving</text>
+      </g>
+      <g>
+        <rect x="830" y="135" width="190" height="90" rx="8" fill="#0f172a"/>
+        <rect x="830" y="135" width="190" height="90" rx="8" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="856" y="162" class="label">Workflow Orchestrator</text>
+        <text x="856" y="180" class="sub">state machine + gates</text>
+        <text x="856" y="198" class="sub">safe CLI action shellout</text>
+      </g>
+
+      <!-- middle systems -->
+      <g>
+        <rect x="260" y="305" width="230" height="90" rx="8" fill="#0f172a"/>
+        <rect x="260" y="305" width="230" height="90" rx="8" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="286" y="332" class="label">Repo Layer</text>
+        <text x="286" y="350" class="sub">git branch manager</text>
+        <text x="286" y="368" class="sub">repo scan + validation detect</text>
+      </g>
+      <g>
+        <rect x="555" y="305" width="220" height="90" rx="8" fill="#0f172a"/>
+        <rect x="555" y="305" width="220" height="90" rx="8" fill="rgba(136,19,55,.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="580" y="332" class="label">Policy + Approvals</text>
+        <text x="580" y="350" class="sub">implementation/execution</text>
+        <text x="580" y="368" class="sub">PR + enterprise gates</text>
+      </g>
+      <g>
+        <rect x="835" y="305" width="230" height="90" rx="8" fill="#0f172a"/>
+        <rect x="835" y="305" width="230" height="90" rx="8" fill="rgba(6,78,59,.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="862" y="332" class="label">Validation + Confidence</text>
+        <text x="862" y="350" class="sub">config parse, tests, diff risk</text>
+        <text x="862" y="368" class="sub">evidence-based score</text>
+      </g>
+
+      <!-- storage/artifacts -->
+      <g>
+        <rect x="110" y="505" width="250" height="115" rx="8" fill="#0f172a"/>
+        <rect x="110" y="505" width="250" height="115" rx="8" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="134" y="532" class="label">Run Artifacts</text>
+        <text x="134" y="550" class="sub">manifest, context-pack</text>
+        <text x="134" y="568" class="sub">diff, changed-files</text>
+        <text x="134" y="586" class="sub">validation, confidence, audit</text>
+      </g>
+      <g>
+        <rect x="505" y="505" width="260" height="115" rx="8" fill="#0f172a"/>
+        <rect x="505" y="505" width="260" height="115" rx="8" fill="rgba(76,29,149,.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="530" y="532" class="label">.agentic-sdlc/</text>
+        <text x="530" y="550" class="sub">repo-local ignored state</text>
+        <text x="530" y="568" class="sub">approvals.jsonl + events.jsonl</text>
+        <text x="530" y="586" class="sub">policy.json + request previews</text>
+      </g>
+      <g>
+        <rect x="950" y="505" width="245" height="115" rx="8" fill="#0f172a"/>
+        <rect x="950" y="505" width="245" height="115" rx="8" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="974" y="532" class="label">Enterprise Dry-Run</text>
+        <text x="974" y="550" class="sub">Stash/Bitbucket request JSON</text>
+        <text x="974" y="568" class="sub">Jira/Confluence previews</text>
+        <text x="974" y="586" class="sub">no real writes by default</text>
+      </g>
+
+      <!-- future adapters -->
+      <g>
+        <rect x="515" y="700" width="280" height="70" rx="8" fill="#0f172a"/>
+        <rect x="515" y="700" width="280" height="70" rx="8" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="540" y="727" class="label">Future Agent Adapter Layer</text>
+        <text x="540" y="746" class="sub">Mock → Amp SDK → Copilot / others</text>
+      </g>
+
+      <!-- legend -->
+      <g transform="translate(55,790)">
+        <text x="0" y="0" class="tiny">Legend</text>
+        <rect x="0" y="14" width="12" height="12" fill="rgba(8,51,68,.4)" stroke="#22d3ee"/><text x="20" y="24" class="tiny">UI/Entry</text>
+        <rect x="110" y="14" width="12" height="12" fill="rgba(6,78,59,.4)" stroke="#34d399"/><text x="130" y="24" class="tiny">Control Plane</text>
+        <rect x="260" y="14" width="12" height="12" fill="rgba(76,29,149,.4)" stroke="#a78bfa"/><text x="280" y="24" class="tiny">Artifacts</text>
+        <rect x="395" y="14" width="12" height="12" fill="rgba(136,19,55,.4)" stroke="#fb7185"/><text x="415" y="24" class="tiny">Policy/Security</text>
+        <rect x="555" y="14" width="12" height="12" fill="rgba(120,53,15,.3)" stroke="#fbbf24"/><text x="575" y="24" class="tiny">Enterprise Preview</text>
+        <rect x="740" y="14" width="12" height="12" fill="rgba(30,41,59,.5)" stroke="#94a3b8"/><text x="760" y="24" class="tiny">Future Adapter</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>Workflow Contract</h3>
+      <ul>
+        <li>• request → context → plan → approval</li>
+        <li>• execute explicit config change only</li>
+        <li>• validate → confidence → PR preview</li>
+        <li>• enterprise writes stay dry-run first</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Safety Model</h3>
+      <ul>
+        <li>• protected branch refusal</li>
+        <li>• approval gates persisted in JSONL</li>
+        <li>• local-only daemon by default</li>
+        <li>• no merge/deploy/production mutation</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Continue Building</h3>
+      <ul>
+        <li>• split CLI into modules</li>
+        <li>• add provider adapter interface</li>
+        <li>• wire real Stash/Jira behind approvals</li>
+        <li>• improve mission-control forms/timeline</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    Generated handoff diagram for `agent-sdlc-control-plane`. Open this file in any browser. No runtime dependencies required.
+  </footer>
+</div>
+</body>
+</html>

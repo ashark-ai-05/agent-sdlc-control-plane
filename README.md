@@ -2,6 +2,14 @@
 
 Local-first Agentic SDLC workflow control CLI.
 
+Handoff docs for continuing on another PC:
+
+```text
+docs/CONTINUATION_PROMPT.md  # prompt to paste into a new AI coding session
+docs/ARCHITECTURE.md         # architecture notes and future direction
+docs/architecture.html       # browser-openable SVG architecture diagram
+```
+
 Implemented MVP commands:
 
 ```bash
