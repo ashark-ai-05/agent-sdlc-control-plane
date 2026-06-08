@@ -45,6 +45,7 @@ What already exists:
   - `agent-sdlc run status --repo <repo> --run <run-id> [--json]`
   - `agent-sdlc run audit-report --repo <repo> --run <run-id>`
   - `agent-sdlc approval list|approve|reject --repo <repo> --run <run-id> ...`
+  - `agent-sdlc feature interpret --repo <repo> --run <run-id> --requirement <text> --agent-adapter mock-agent`
   - `agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> --mock-agent --auto-approve`
   - `agent-sdlc feature pr-preview --repo <repo> --run <run-id>`
   - `agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash --project-key <key> --repo-slug <slug> --reviewers alice,bob --dry-run`
@@ -72,14 +73,15 @@ Supported daemon actions:
 Current workflow shape:
 1. `run init` scaffolds `.agentic-sdlc/runs/<run-id>/manifest.json`, `context-pack.json`, `approvals.jsonl`, `events.jsonl`, and `.agentic-sdlc/policy.json`.
 2. Approve `implementation_plan`.
-3. `feature execute` creates/checks out a safe working branch, resolves `mock-agent` through the adapter layer, applies an explicit deterministic config change, writes `agent-adapter.json`, validates config, runs validation commands, writes changed-files/diff/output/summary/confidence artifacts, and stops at `waiting_pr_approval`.
-4. `feature pr-preview` writes PR title/body/checklist/preview artifacts only.
-5. Approve `pr_creation`.
-6. `feature create-pr` writes a dry-run Stash/Bitbucket request artifact only.
-7. `feature enterprise-preview` writes Jira/Confluence preview artifacts only.
-8. Approve `enterprise_update`.
-9. `feature apply-enterprise-updates` writes dry-run Jira/Confluence apply request artifacts only.
-10. `run audit-report` writes a markdown audit report.
+3. `feature interpret` runs the adapter `interpret_requirement` phase, writes interpreted requirement artifacts, and stops at `waiting_requirement_approval`.
+4. `feature execute` creates/checks out a safe working branch, resolves `mock-agent` through the adapter layer, applies an explicit deterministic config change, writes `agent-adapter.json`, validates config, runs validation commands, writes changed-files/diff/output/summary/confidence artifacts, and stops at `waiting_pr_approval`.
+5. `feature pr-preview` writes PR title/body/checklist/preview artifacts only.
+6. Approve `pr_creation`.
+7. `feature create-pr` writes a dry-run Stash/Bitbucket request artifact only.
+8. `feature enterprise-preview` writes Jira/Confluence preview artifacts only.
+9. Approve `enterprise_update`.
+10. `feature apply-enterprise-updates` writes dry-run Jira/Confluence apply request artifacts only.
+11. `run audit-report` writes a markdown audit report.
 
 Core artifact paths:
 - `.agentic-sdlc/policy.json`
@@ -90,6 +92,9 @@ Core artifact paths:
 - `.agentic-sdlc/runs/<run-id>/context-pack.json`
 - `.agentic-sdlc/runs/<run-id>/approvals.jsonl`
 - `.agentic-sdlc/runs/<run-id>/events.jsonl`
+- `.agentic-sdlc/runs/<run-id>/agent-adapter-interpret-requirement.json`
+- `.agentic-sdlc/runs/<run-id>/interpreted-requirement.json`
+- `.agentic-sdlc/runs/<run-id>/interpreted-requirement.md`
 - `.agentic-sdlc/runs/<run-id>/agent-adapter.json`
 - `.agentic-sdlc/runs/<run-id>/changed-files.json`
 - `.agentic-sdlc/runs/<run-id>/diff.patch`
@@ -175,6 +180,9 @@ TARGET=/path/to/target/repo
 RUN=demo-run
 
 node ./bin/agent-sdlc.mjs run init --repo "$TARGET" --run "$RUN"
+node ./bin/agent-sdlc.mjs feature interpret --repo "$TARGET" --run "$RUN" \
+  --requirement "Enable feature flag for service-a" \
+  --agent-adapter mock-agent
 node ./bin/agent-sdlc.mjs approval approve --repo "$TARGET" --run "$RUN" --gate implementation_plan --actor demo
 node ./bin/agent-sdlc.mjs feature execute --repo "$TARGET" --run "$RUN" \
   --target-file src/main/resources/application.yml \

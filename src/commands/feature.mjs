@@ -9,6 +9,52 @@ import { chooseValidationCommands, scoreConfidence } from '../core/confidence.mj
 import { die, loadRun } from '../core/run-context.mjs';
 import { bulletList, fileListFromChangedFiles, firstLine, parseCsv, validationLines } from '../core/text.mjs';
 
+export function featureInterpret(args) {
+  const repo = resolve(String(args.repo || ''));
+  const runId = String(args.run || '');
+  const requirement = String(args.requirement || '');
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  if (!runId) die('--run is required');
+  if (!requirement.trim()) die('--requirement is required');
+
+  const { root, runDir, manifest, contextPack, eventsPath } = loadRun(repo, runId);
+  const adapterName = args['agent-adapter'] || args.adapter || manifest.agentAdapter || contextPack.agentAdapter || 'mock-agent';
+  const adapter = resolveAgentAdapter(String(adapterName));
+  const interpretedRequirement = adapter.interpretRequirement({ requirement, runId, manifest, contextPack });
+  const adapterArtifact = {
+    provider: interpretedRequirement.provider,
+    contractVersion: interpretedRequirement.contractVersion,
+    phase: interpretedRequirement.phase,
+    capabilities: interpretedRequirement.capabilities,
+    audit: interpretedRequirement.audit,
+  };
+  const markdown = `# Interpreted requirement\n\n## Intent\n\n${interpretedRequirement.intent}\n\n## Summary\n\n${interpretedRequirement.summary}\n\n## Constraints\n\n${bulletList(interpretedRequirement.constraints)}\n\n## Assumptions\n\n${bulletList(interpretedRequirement.assumptions)}\n\n## Unknowns\n\n${bulletList(interpretedRequirement.unknowns)}\n\n## Approval\n\nApprove or reject the \`requirement\` gate before planning.\n`;
+
+  writeJson(join(runDir, 'agent-adapter-interpret-requirement.json'), adapterArtifact);
+  writeJson(join(runDir, 'interpreted-requirement.json'), {
+    runId,
+    repository: root,
+    ...interpretedRequirement,
+    adapter: adapterArtifact,
+  });
+  writeFileSync(join(runDir, 'interpreted-requirement.md'), markdown);
+  appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: adapterArtifact.phase, capabilities: adapterArtifact.capabilities });
+  appendJsonl(eventsPath, { type: 'requirement_interpreted', runId, provider: adapterArtifact.provider, phase: adapterArtifact.phase });
+
+  console.log(JSON.stringify({
+    runId,
+    repo: root,
+    state: 'waiting_requirement_approval',
+    adapter: adapterArtifact,
+    interpretedRequirement,
+    artifacts: {
+      interpretedRequirementJson: join(runDir, 'interpreted-requirement.json'),
+      interpretedRequirementMarkdown: join(runDir, 'interpreted-requirement.md'),
+      adapter: join(runDir, 'agent-adapter-interpret-requirement.json'),
+    },
+  }, null, 2));
+}
+
 export function featureExecute(args) {
   const repo = resolve(String(args.repo || ''));
   const runId = String(args.run || '');

@@ -63,6 +63,12 @@ agent-sdlc run list \
   --repo /path/to/repo \
   --json
 
+agent-sdlc feature interpret \
+  --repo /path/to/repo \
+  --run <run-id> \
+  --requirement "Enable feature flag for service-a" \
+  --agent-adapter mock-agent
+
 agent-sdlc feature execute \
   --repo /path/to/repo \
   --run <run-id> \
@@ -149,6 +155,9 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/repo-scan.json
 .agentic-sdlc/policy-validation.json
 .agentic-sdlc/config-validation.json
+.agentic-sdlc/runs/<run-id>/agent-adapter-interpret-requirement.json
+.agentic-sdlc/runs/<run-id>/interpreted-requirement.json
+.agentic-sdlc/runs/<run-id>/interpreted-requirement.md
 .agentic-sdlc/runs/<run-id>/agent-adapter.json
 .agentic-sdlc/runs/<run-id>/changed-files.json
 .agentic-sdlc/runs/<run-id>/diff.patch
@@ -158,6 +167,8 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/confidence.json
 .agentic-sdlc/runs/<run-id>/events.jsonl
 ```
+
+The `feature interpret` command runs the adapter `interpret_requirement` phase and writes `interpreted-requirement.json`, `interpreted-requirement.md`, and `agent-adapter-interpret-requirement.json`. The mock adapter is deterministic/local-only and stops at `waiting_requirement_approval` so a human can approve or correct the interpretation before planning/execution.
 
 The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic mock adapter config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
 

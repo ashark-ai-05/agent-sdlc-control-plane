@@ -34,6 +34,26 @@ function makeRepo() {
   return repo;
 }
 
+test('feature interpret uses adapter and persists interpreted requirement artifacts', () => {
+  const repo = makeRepo();
+  const result = spawnSync('node', [cli, 'feature', 'interpret', '--repo', repo, '--run', 'run-1', '--requirement', 'Enable feature flag for service-a', '--agent-adapter', 'mock-agent'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_requirement_approval');
+  assert.equal(payload.adapter.provider, 'mock-agent');
+  assert.equal(payload.adapter.phase, 'interpret_requirement');
+  assert.equal(payload.interpretedRequirement.intent, 'Enable feature flag for service-a');
+  assert.deepEqual(payload.interpretedRequirement.constraints, ['local-only mock interpretation', 'human approval required before planning or execution']);
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  const interpreted = JSON.parse(readFileSync(join(runDir, 'interpreted-requirement.json'), 'utf8'));
+  assert.equal(interpreted.intent, 'Enable feature flag for service-a');
+  assert.equal(interpreted.adapter.provider, 'mock-agent');
+  assert.match(readFileSync(join(runDir, 'interpreted-requirement.md'), 'utf8'), /Enable feature flag for service-a/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-interpret-requirement.json'), 'utf8'), /interpret_requirement/);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /requirement_interpreted/);
+});
+
 test('feature execute applies controlled config change and persists artifacts', () => {
   const repo = makeRepo();
   const result = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
