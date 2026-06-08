@@ -84,6 +84,11 @@ export function artifactChecklist(runDir) {
     'agent-adapter-interpret-requirement.json',
     'interpreted-requirement.json',
     'interpreted-requirement.md',
+    'agent-adapter-plan.json',
+    'task-breakdown.json',
+    'task-breakdown.md',
+    'implementation-plan.json',
+    'implementation-plan.md',
     'agent-adapter.json',
     'changed-files.json',
     'diff.patch',
@@ -91,12 +96,16 @@ export function artifactChecklist(runDir) {
     'config-validation.json',
     'validation-summary.json',
     'confidence.json',
+    'agent-adapter-review.json',
+    'change-review.json',
+    'change-review.md',
     'pr-preview.md',
     'pr-title.txt',
     'pr-body.md',
     'review-checklist.md',
     'stash-create-pr-request.json',
     'bitbucket-create-pr-request.json',
+    'agent-adapter-update-previews.json',
     'jira-update-preview.md',
     'confluence-update-preview.md',
     'enterprise-update-request.json',
@@ -117,6 +126,8 @@ export function inferState({ artifacts, approvalsPresent, validationSummary }) {
   if (has('confidence.json')) return 'waiting_pr_approval';
   if (approvalsPresent.includes('execution')) return 'ready_to_execute_or_executing';
   if (approvalsPresent.includes('implementation_plan')) return 'waiting_execution_approval';
+  if (has('implementation-plan.json')) return 'waiting_plan_approval';
+  if (has('interpreted-requirement.json')) return 'waiting_requirement_approval';
   if (has('context-pack.json')) return 'waiting_plan_approval';
   return 'created';
 }
@@ -124,6 +135,8 @@ export function inferState({ artifacts, approvalsPresent, validationSummary }) {
 export function nextCommandForState(state, repo, runId) {
   const quotedRepo = repo.includes(' ') ? `"${repo}"` : repo;
   const byState = {
+    waiting_requirement_approval: `approve requirement, then: agent-sdlc feature plan --repo ${quotedRepo} --run ${runId}`,
+    waiting_plan_approval: `agent-sdlc feature plan --repo ${quotedRepo} --run ${runId}, then approve implementation_plan`,
     waiting_execution_approval: `agent-sdlc feature execute --repo ${quotedRepo} --run ${runId} --target-file <file> --set-key <key> --set-value <value> --mock-agent --auto-approve`,
     ready_to_execute_or_executing: `agent-sdlc feature execute --repo ${quotedRepo} --run ${runId} --target-file <file> --set-key <key> --set-value <value> --mock-agent`,
     waiting_pr_approval: `agent-sdlc feature pr-preview --repo ${quotedRepo} --run ${runId}`,

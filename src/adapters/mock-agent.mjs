@@ -28,6 +28,98 @@ export function createMockAgentAdapter() {
         },
       };
     },
+    createTaskBreakdown({ runId, interpretedRequirement = {} }) {
+      const intent = interpretedRequirement.intent || interpretedRequirement.summary || 'Unspecified requirement';
+      return {
+        provider: contract.provider,
+        contractVersion: contract.contractVersion,
+        phase: 'create_task_breakdown',
+        capabilities: contract.capabilities,
+        runId,
+        tasks: [
+          {
+            id: 'task-1',
+            title: `Plan controlled implementation for: ${intent}`,
+            type: 'planning',
+            risk: 'low',
+          },
+          {
+            id: 'task-2',
+            title: 'Validate config change and capture evidence',
+            type: 'validation',
+            risk: 'low',
+          },
+        ],
+        audit: {
+          deterministic: true,
+          arbitraryCodeExecution: false,
+          externalWrites: false,
+        },
+      };
+    },
+    createImplementationPlan({ runId, interpretedRequirement = {}, taskBreakdown = {} }) {
+      const intent = interpretedRequirement.intent || interpretedRequirement.summary || 'Unspecified requirement';
+      return {
+        provider: contract.provider,
+        contractVersion: contract.contractVersion,
+        phase: 'create_implementation_plan',
+        capabilities: contract.capabilities,
+        runId,
+        summary: `Mock implementation plan for: ${intent}`,
+        steps: [
+          'Apply controlled config change using explicit target-file, set-key, and set-value arguments.',
+          'Capture changed files and diff artifacts.',
+          'Run configured validation commands and persist output.',
+          'Compute confidence and require execution approval before file writes in non-demo mode.',
+        ],
+        tasks: Array.isArray(taskBreakdown.tasks) ? taskBreakdown.tasks.map((task) => task.id) : [],
+        requiredApprovals: ['implementation_plan', 'execution', 'pr_creation'],
+        audit: {
+          deterministic: true,
+          arbitraryCodeExecution: false,
+          externalWrites: false,
+        },
+      };
+    },
+    reviewChanges({ runId, changedFiles = [], validationSummary = {}, confidence = {}, diff = '' }) {
+      return {
+        provider: contract.provider,
+        contractVersion: contract.contractVersion,
+        phase: 'review_changes',
+        capabilities: contract.capabilities,
+        runId,
+        recommendation: validationSummary.ok === false ? 'request_changes' : 'approve_with_human_review',
+        changedFiles,
+        validationOk: validationSummary.ok ?? null,
+        confidenceRating: confidence.rating || 'not_scored',
+        findings: [
+          changedFiles.length === 1 ? 'single-file change detected' : `${changedFiles.length} changed files detected`,
+          diff ? 'diff artifact available for human review' : 'diff artifact missing or empty',
+        ],
+        humanReviewFocus: confidence.recommendedHumanReviewFocus || ['inspect diff.patch before PR approval'],
+        audit: {
+          deterministic: true,
+          arbitraryCodeExecution: false,
+          externalWrites: false,
+        },
+      };
+    },
+    generateUpdatePreviews({ runId, prTitle = '', changedFiles = [] }) {
+      return {
+        provider: contract.provider,
+        contractVersion: contract.contractVersion,
+        phase: 'generate_update_previews',
+        capabilities: contract.capabilities,
+        runId,
+        summary: prTitle || `Agent SDLC update preview for ${runId}`,
+        changedFiles,
+        audit: {
+          deterministic: true,
+          arbitraryCodeExecution: false,
+          externalWrites: false,
+        },
+      };
+    },
     executeApprovedPlan({ root, runId, targetFile, setKey, setValue }) {
       const absoluteTarget = resolve(root, targetFile);
       const relativeTarget = relative(root, absoluteTarget);

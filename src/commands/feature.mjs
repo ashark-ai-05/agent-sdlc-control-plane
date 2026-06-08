@@ -55,6 +55,101 @@ export function featureInterpret(args) {
   }, null, 2));
 }
 
+export function featurePlan(args) {
+  const repo = resolve(String(args.repo || ''));
+  const runId = String(args.run || '');
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  if (!runId) die('--run is required');
+
+  const { root, runDir, manifest, contextPack, eventsPath } = loadRun(repo, runId);
+  const interpretedRequirement = readJson(join(runDir, 'interpreted-requirement.json'), {});
+  if (!Object.keys(interpretedRequirement).length) die(`interpreted-requirement.json missing in ${runDir}; run feature interpret first`);
+  const adapterName = args['agent-adapter'] || args.adapter || manifest.agentAdapter || contextPack.agentAdapter || 'mock-agent';
+  const adapter = resolveAgentAdapter(String(adapterName));
+  const taskBreakdown = adapter.createTaskBreakdown({ runId, manifest, contextPack, interpretedRequirement });
+  const implementationPlan = adapter.createImplementationPlan({ runId, manifest, contextPack, interpretedRequirement, taskBreakdown });
+  const adapterArtifact = {
+    provider: implementationPlan.provider,
+    contractVersion: implementationPlan.contractVersion,
+    phase: implementationPlan.phase,
+    phases: ['create_task_breakdown', 'create_implementation_plan'],
+    capabilities: implementationPlan.capabilities,
+    audit: implementationPlan.audit,
+  };
+  const taskMarkdown = `# Task breakdown\n\n## Requirement\n\n${interpretedRequirement.intent || interpretedRequirement.summary || 'Unknown requirement'}\n\n## Tasks\n\n${taskBreakdown.tasks.map((task) => `- ${task.id}: ${task.title} (${task.type}, risk=${task.risk})`).join('\n')}\n`;
+  const planMarkdown = `# Implementation plan\n\n## Summary\n\n${implementationPlan.summary}\n\n## Steps\n\n${implementationPlan.steps.map((step, index) => `${index + 1}. ${step}`).join('\n')}\n\n## Required approvals\n\n${bulletList(implementationPlan.requiredApprovals)}\n\nHuman execution approval is required before file writes outside demo auto-approve mode.\n`;
+
+  writeJson(join(runDir, 'task-breakdown.json'), { runId, repository: root, ...taskBreakdown });
+  writeFileSync(join(runDir, 'task-breakdown.md'), taskMarkdown);
+  writeJson(join(runDir, 'implementation-plan.json'), { runId, repository: root, ...implementationPlan });
+  writeFileSync(join(runDir, 'implementation-plan.md'), planMarkdown);
+  writeJson(join(runDir, 'agent-adapter-plan.json'), adapterArtifact);
+  appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: 'create_task_breakdown', capabilities: adapterArtifact.capabilities });
+  appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: 'create_implementation_plan', capabilities: adapterArtifact.capabilities });
+  appendJsonl(eventsPath, { type: 'task_breakdown_created', runId, provider: adapterArtifact.provider });
+  appendJsonl(eventsPath, { type: 'implementation_plan_created', runId, provider: adapterArtifact.provider });
+
+  console.log(JSON.stringify({
+    runId,
+    repo: root,
+    state: 'waiting_plan_approval',
+    adapter: adapterArtifact,
+    taskBreakdown,
+    implementationPlan,
+    artifacts: {
+      taskBreakdownJson: join(runDir, 'task-breakdown.json'),
+      taskBreakdownMarkdown: join(runDir, 'task-breakdown.md'),
+      implementationPlanJson: join(runDir, 'implementation-plan.json'),
+      implementationPlanMarkdown: join(runDir, 'implementation-plan.md'),
+      adapter: join(runDir, 'agent-adapter-plan.json'),
+    },
+  }, null, 2));
+}
+
+export function featureReview(args) {
+  const repo = resolve(String(args.repo || ''));
+  const runId = String(args.run || '');
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  if (!runId) die('--run is required');
+
+  const { root, runDir, manifest, contextPack, eventsPath } = loadRun(repo, runId);
+  const changedFiles = fileListFromChangedFiles(readJson(join(runDir, 'changed-files.json'), {}));
+  const validationSummary = readJson(join(runDir, 'validation-summary.json'), {});
+  const confidence = readJson(join(runDir, 'confidence.json'), {});
+  const diff = loadOptionalText(join(runDir, 'diff.patch'));
+  if (!changedFiles.length) die(`changed-files.json missing or empty in ${runDir}; run feature execute first`);
+  const adapterName = args['agent-adapter'] || args.adapter || manifest.agentAdapter || contextPack.agentAdapter || 'mock-agent';
+  const adapter = resolveAgentAdapter(String(adapterName));
+  const review = adapter.reviewChanges({ runId, manifest, contextPack, changedFiles, validationSummary, confidence, diff });
+  const adapterArtifact = {
+    provider: review.provider,
+    contractVersion: review.contractVersion,
+    phase: review.phase,
+    capabilities: review.capabilities,
+    audit: review.audit,
+  };
+  const markdown = `# Change review\n\n## Recommendation\n\n${review.recommendation}\n\n## Findings\n\n${bulletList(review.findings)}\n\n## Human review focus\n\n${bulletList(review.humanReviewFocus)}\n`;
+
+  writeJson(join(runDir, 'change-review.json'), { runId, repository: root, ...review, adapter: adapterArtifact });
+  writeFileSync(join(runDir, 'change-review.md'), markdown);
+  writeJson(join(runDir, 'agent-adapter-review.json'), adapterArtifact);
+  appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: adapterArtifact.phase, capabilities: adapterArtifact.capabilities });
+  appendJsonl(eventsPath, { type: 'changes_reviewed', runId, provider: adapterArtifact.provider, recommendation: review.recommendation });
+
+  console.log(JSON.stringify({
+    runId,
+    repo: root,
+    state: 'waiting_pr_approval',
+    adapter: adapterArtifact,
+    review,
+    artifacts: {
+      changeReviewJson: join(runDir, 'change-review.json'),
+      changeReviewMarkdown: join(runDir, 'change-review.md'),
+      adapter: join(runDir, 'agent-adapter-review.json'),
+    },
+  }, null, 2));
+}
+
 export function featureExecute(args) {
   const repo = resolve(String(args.repo || ''));
   const runId = String(args.run || '');
@@ -365,6 +460,16 @@ export function featureEnterprisePreview(args) {
   const prUrlPlaceholder = prRequest.url || '<PR URL pending creation>';
   const validationText = validationSummary.ok ? 'Validation passed' : 'Validation failed or unavailable';
   const confidenceText = confidence.overallConfidence == null ? 'not scored' : `${confidence.overallConfidence} (${confidence.rating || 'unrated'})`;
+  const adapterName = args['agent-adapter'] || args.adapter || manifest.agentAdapter || contextPack.agentAdapter || 'mock-agent';
+  const adapter = resolveAgentAdapter(String(adapterName));
+  const updatePreview = adapter.generateUpdatePreviews({ runId, manifest, contextPack, prTitle, changedFiles });
+  const adapterArtifact = {
+    provider: updatePreview.provider,
+    contractVersion: updatePreview.contractVersion,
+    phase: updatePreview.phase,
+    capabilities: updatePreview.capabilities,
+    audit: updatePreview.audit,
+  };
 
   const jiraPreview = `# Jira update preview\n\nIssue: ${jiraKey}\n\n## Proposed comment\n\nAgent SDLC run \`${runId}\` prepared a PR creation request.\n\n- PR title: ${prTitle}\n- Source branch: \`${sourceBranch}\`\n- Target branch: \`${targetBranch}\`\n- PR URL: ${prUrlPlaceholder}\n- Validation: ${validationText}\n- Confidence: ${confidenceText}\n\nChanged files:\n${bulletList(changedFiles)}\n\nHuman approval required before this Jira comment is written: \`enterprise_update\`.\n`;
 
@@ -410,8 +515,10 @@ export function featureEnterprisePreview(args) {
 
   writeFileSync(join(runDir, 'jira-update-preview.md'), jiraPreview);
   writeFileSync(join(runDir, 'confluence-update-preview.md'), confluencePreview);
+  writeJson(join(runDir, 'agent-adapter-update-previews.json'), adapterArtifact);
   writeJson(join(runDir, 'enterprise-update-request.json'), enterpriseRequest);
-  appendJsonl(eventsPath, { type: 'enterprise_update_preview_generated', runId, artifacts: ['jira-update-preview.md', 'confluence-update-preview.md', 'enterprise-update-request.json'] });
+  appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: adapterArtifact.phase, capabilities: adapterArtifact.capabilities });
+  appendJsonl(eventsPath, { type: 'enterprise_update_preview_generated', runId, artifacts: ['jira-update-preview.md', 'confluence-update-preview.md', 'enterprise-update-request.json', 'agent-adapter-update-previews.json'] });
   appendJsonl(eventsPath, { type: 'waiting_for_enterprise_update_approval', gate: 'enterprise_update' });
 
   console.log(JSON.stringify({
@@ -423,6 +530,7 @@ export function featureEnterprisePreview(args) {
       jiraPreview: join(runDir, 'jira-update-preview.md'),
       confluencePreview: join(runDir, 'confluence-update-preview.md'),
       enterpriseRequest: join(runDir, 'enterprise-update-request.json'),
+      adapter: join(runDir, 'agent-adapter-update-previews.json'),
     },
   }, null, 2));
 }

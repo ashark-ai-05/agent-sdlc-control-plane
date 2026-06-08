@@ -179,4 +179,4 @@ review_changes
 generate_update_previews
 ```
 
-The first implemented adapter is `mock-agent`, which supports deterministic local requirement interpretation through `interpret_requirement`, deterministic local config changes through `execute_approved_plan`, and writes adapter artifacts (`agent-adapter-interpret-requirement.json`, `agent-adapter.json`) for auditability. Add Amp SDK, then Copilot or other providers behind this interface.
+The first implemented adapter is `mock-agent`, which supports deterministic local requirement interpretation through `interpret_requirement`, task breakdown + implementation planning through `create_task_breakdown`/`create_implementation_plan`, deterministic local config changes through `execute_approved_plan`, deterministic review through `review_changes`, and update-preview metadata through `generate_update_previews`. It writes adapter artifacts for auditability. Add Amp SDK, then Copilot or other providers behind this interface.

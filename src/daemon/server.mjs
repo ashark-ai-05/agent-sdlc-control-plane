@@ -41,7 +41,10 @@ function readRequestJson(req) {
 function runCliAction(root, runId, action, body = {}) {
   const baseArgs = ['--repo', root, '--run', runId];
   const actionArgs = {
+    'interpret': ['feature', 'interpret', ...baseArgs, '--requirement', String(body.requirement || ''), '--agent-adapter', String(body.agentAdapter || body['agent-adapter'] || 'mock-agent')],
+    'plan': ['feature', 'plan', ...baseArgs, '--agent-adapter', String(body.agentAdapter || body['agent-adapter'] || 'mock-agent')],
     'execute': ['feature', 'execute', ...baseArgs, '--target-file', String(body.targetFile || body['target-file'] || ''), '--set-key', String(body.setKey || body['set-key'] || ''), '--set-value', String(body.setValue ?? body['set-value'] ?? ''), '--mock-agent', '--auto-approve'],
+    'review': ['feature', 'review', ...baseArgs, '--agent-adapter', String(body.agentAdapter || body['agent-adapter'] || 'mock-agent')],
     'pr-preview': ['feature', 'pr-preview', ...baseArgs],
     'audit-report': ['run', 'audit-report', ...baseArgs],
     'create-pr': ['feature', 'create-pr', ...baseArgs, '--provider', String(body.provider || 'stash'), '--project-key', String(body.projectKey || body['project-key'] || 'TBD_PROJECT'), '--repo-slug', String(body.repoSlug || body['repo-slug'] || 'TBD_REPO'), '--reviewers', parseCsv(body.reviewers).join(','), '--dry-run'],

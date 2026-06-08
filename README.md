@@ -69,6 +69,11 @@ agent-sdlc feature interpret \
   --requirement "Enable feature flag for service-a" \
   --agent-adapter mock-agent
 
+agent-sdlc feature plan \
+  --repo /path/to/repo \
+  --run <run-id> \
+  --agent-adapter mock-agent
+
 agent-sdlc feature execute \
   --repo /path/to/repo \
   --run <run-id> \
@@ -77,6 +82,11 @@ agent-sdlc feature execute \
   --set-value true \
   --mock-agent \
   --auto-approve
+
+agent-sdlc feature review \
+  --repo /path/to/repo \
+  --run <run-id> \
+  --agent-adapter mock-agent
 
 agent-sdlc feature pr-preview \
   --repo /path/to/repo \
@@ -158,6 +168,11 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/agent-adapter-interpret-requirement.json
 .agentic-sdlc/runs/<run-id>/interpreted-requirement.json
 .agentic-sdlc/runs/<run-id>/interpreted-requirement.md
+.agentic-sdlc/runs/<run-id>/agent-adapter-plan.json
+.agentic-sdlc/runs/<run-id>/task-breakdown.json
+.agentic-sdlc/runs/<run-id>/task-breakdown.md
+.agentic-sdlc/runs/<run-id>/implementation-plan.json
+.agentic-sdlc/runs/<run-id>/implementation-plan.md
 .agentic-sdlc/runs/<run-id>/agent-adapter.json
 .agentic-sdlc/runs/<run-id>/changed-files.json
 .agentic-sdlc/runs/<run-id>/diff.patch
@@ -165,12 +180,19 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/config-validation.json
 .agentic-sdlc/runs/<run-id>/validation-summary.json
 .agentic-sdlc/runs/<run-id>/confidence.json
+.agentic-sdlc/runs/<run-id>/agent-adapter-review.json
+.agentic-sdlc/runs/<run-id>/change-review.json
+.agentic-sdlc/runs/<run-id>/change-review.md
 .agentic-sdlc/runs/<run-id>/events.jsonl
 ```
 
 The `feature interpret` command runs the adapter `interpret_requirement` phase and writes `interpreted-requirement.json`, `interpreted-requirement.md`, and `agent-adapter-interpret-requirement.json`. The mock adapter is deterministic/local-only and stops at `waiting_requirement_approval` so a human can approve or correct the interpretation before planning/execution.
 
+The `feature plan` command runs `create_task_breakdown` and `create_implementation_plan`, writes task breakdown and implementation plan artifacts, and stops at `waiting_plan_approval` for human approval.
+
 The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic mock adapter config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
+
+The `feature review` command runs `review_changes` against the execution diff, validation summary, confidence, and changed files, then writes deterministic change-review artifacts before PR preview/approval.
 
 For `.yaml`/`.yml` target files, dotted keys are written as nested YAML. For example `--set-key feature.enabled --set-value true` writes:
 
@@ -200,7 +222,7 @@ POST /api/runs/<run-id>/actions/<action>
 POST /api/runs/<run-id>/approvals
 ```
 
-The daemon is local-only by default (`127.0.0.1`) and writes the same approval JSONL records as the CLI. Supported action names are `execute`, `pr-preview`, `audit-report`, `create-pr`, `enterprise-preview`, and `apply-enterprise-updates`; each action shells back through the CLI and returns the resulting status/artifacts.
+The daemon is local-only by default (`127.0.0.1`) and writes the same approval JSONL records as the CLI. Supported action names are `interpret`, `plan`, `execute`, `review`, `pr-preview`, `audit-report`, `create-pr`, `enterprise-preview`, and `apply-enterprise-updates`; each action shells back through the CLI and returns the resulting status/artifacts.
 
 The `feature pr-preview` command reads the execution artifacts and generates PR preview artifacts only. It does not push branches, create PRs, or write to enterprise systems.
 
@@ -226,6 +248,7 @@ The `feature enterprise-preview` command generates proposed Jira/Confluence upda
 Enterprise preview artifacts:
 
 ```text
+.agentic-sdlc/runs/<run-id>/agent-adapter-update-previews.json
 .agentic-sdlc/runs/<run-id>/jira-update-preview.md
 .agentic-sdlc/runs/<run-id>/confluence-update-preview.md
 .agentic-sdlc/runs/<run-id>/enterprise-update-request.json

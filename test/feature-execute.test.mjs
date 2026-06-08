@@ -54,6 +54,49 @@ test('feature interpret uses adapter and persists interpreted requirement artifa
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /requirement_interpreted/);
 });
 
+function interpretRequirement(repo) {
+  const result = spawnSync('node', [cli, 'feature', 'interpret', '--repo', repo, '--run', 'run-1', '--requirement', 'Enable feature flag for service-a', '--agent-adapter', 'mock-agent'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout);
+}
+
+test('feature plan creates task breakdown and implementation plan artifacts', () => {
+  const repo = makeRepo();
+  interpretRequirement(repo);
+  const result = spawnSync('node', [cli, 'feature', 'plan', '--repo', repo, '--run', 'run-1', '--agent-adapter', 'mock-agent'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_plan_approval');
+  assert.equal(payload.adapter.provider, 'mock-agent');
+  assert.equal(payload.adapter.phase, 'create_implementation_plan');
+  assert.equal(payload.taskBreakdown.tasks[0].id, 'task-1');
+  assert.match(payload.implementationPlan.steps[0], /Apply controlled config change/);
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'task-breakdown.md'), 'utf8'), /Enable feature flag for service-a/);
+  assert.match(readFileSync(join(runDir, 'implementation-plan.md'), 'utf8'), /execution approval/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-plan.json'), 'utf8'), /create_implementation_plan/);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /implementation_plan_created/);
+});
+
+test('feature review creates change review artifacts after execution', () => {
+  const repo = makeRepo();
+  const execute = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
+  assert.equal(execute.status, 0, execute.stderr || execute.stdout);
+
+  const result = spawnSync('node', [cli, 'feature', 'review', '--repo', repo, '--run', 'run-1', '--agent-adapter', 'mock-agent'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_pr_approval');
+  assert.equal(payload.adapter.phase, 'review_changes');
+  assert.equal(payload.review.recommendation, 'approve_with_human_review');
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'change-review.md'), 'utf8'), /approve_with_human_review/);
+  assert.match(readFileSync(join(runDir, 'change-review.json'), 'utf8'), /review_changes/);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /changes_reviewed/);
+});
+
 test('feature execute applies controlled config change and persists artifacts', () => {
   const repo = makeRepo();
   const result = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
@@ -182,6 +225,8 @@ test('feature enterprise-preview generates Jira and Confluence update previews',
   assert.equal(request.policy.writeJiraNow, false);
   assert.equal(request.policy.writeConfluenceNow, false);
   assert.deepEqual(request.inputs.changedFiles, ['src/main/resources/application.yml']);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-update-previews.json'), 'utf8'), /generate_update_previews/);
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /adapter_phase_completed/);
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /enterprise_update_preview_generated/);
 });
 

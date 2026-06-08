@@ -1,6 +1,6 @@
 import { parseArgs } from './cli/args.mjs';
 import { approvalCommand } from './commands/approval.mjs';
-import { featureApplyEnterpriseUpdates, featureCreatePr, featureEnterprisePreview, featureExecute, featureInterpret, featurePrPreview } from './commands/feature.mjs';
+import { featureApplyEnterpriseUpdates, featureCreatePr, featureEnterprisePreview, featureExecute, featureInterpret, featurePlan, featurePrPreview, featureReview } from './commands/feature.mjs';
 import { runAuditReport, runInit, runList, runStatus } from './commands/run.mjs';
 import { configValidate, policyValidate, repoScan } from './commands/safety.mjs';
 import { daemonStart } from './daemon/server.mjs';
@@ -14,7 +14,9 @@ function usage() {
   agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]
   agent-sdlc run list --repo <repo> [--json]
   agent-sdlc feature interpret --repo <repo> --run <run-id> --requirement <text> [--agent-adapter mock-agent]
+  agent-sdlc feature plan --repo <repo> --run <run-id> [--agent-adapter mock-agent]
   agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]
+  agent-sdlc feature review --repo <repo> --run <run-id> [--agent-adapter mock-agent]
   agent-sdlc feature pr-preview --repo <repo> --run <run-id>
   agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--project-key ABC] [--repo-slug service] [--reviewers alice,bob] [--allow-failed-validation]
   agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]
@@ -37,7 +39,9 @@ export function main(argv = process.argv.slice(2)) {
   else if (domain === 'run' && action === 'init') runInit(args);
   else if (domain === 'run' && action === 'list') runList(args);
   else if (domain === 'feature' && action === 'interpret') featureInterpret(args);
+  else if (domain === 'feature' && action === 'plan') featurePlan(args);
   else if (domain === 'feature' && action === 'execute') featureExecute(args);
+  else if (domain === 'feature' && action === 'review') featureReview(args);
   else if (domain === 'feature' && action === 'pr-preview') featurePrPreview(args);
   else if (domain === 'feature' && action === 'create-pr') featureCreatePr(args);
   else if (domain === 'feature' && action === 'enterprise-preview') featureEnterprisePreview(args);
