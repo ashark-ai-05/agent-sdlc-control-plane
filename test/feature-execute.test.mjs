@@ -98,7 +98,7 @@ test('feature create-pr requires pr_creation approval', () => {
   const repo = makeRepo();
   executeAndPreview(repo);
 
-  const result = spawnSync('node', [cli, 'feature', 'create-pr', '--repo', repo, '--run', 'run-1', '--provider', 'stash', '--dry-run'], { encoding: 'utf8' });
+  const result = spawnSync('node', [cli, 'feature', 'create-pr', '--repo', repo, '--run', 'run-1', '--provider', 'stash', '--project-key', 'ABC', '--repo-slug', 'service-a', '--reviewers', 'alice,bob', '--dry-run'], { encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /pr_creation approval missing/);
 });
@@ -109,18 +109,26 @@ test('feature create-pr writes stash request after approval', () => {
   const runDir = join(repo, '.agentic-sdlc/runs/run-1');
   appendFileSync(join(runDir, 'approvals.jsonl'), JSON.stringify({ gate: 'pr_creation', status: 'approved', actor: 'test' }) + '\n');
 
-  const result = spawnSync('node', [cli, 'feature', 'create-pr', '--repo', repo, '--run', 'run-1', '--provider', 'stash', '--dry-run'], { encoding: 'utf8' });
+  const result = spawnSync('node', [cli, 'feature', 'create-pr', '--repo', repo, '--run', 'run-1', '--provider', 'stash', '--project-key', 'ABC', '--repo-slug', 'service-a', '--reviewers', 'alice,bob', '--dry-run'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.state, 'pr_creation_request_ready');
   assert.equal(payload.provider, 'stash');
   assert.equal(payload.dryRun, true);
   assert.equal(payload.sourceBranch, 'agent-sdlc/run-1');
+  assert.equal(payload.projectKey, 'ABC');
+  assert.equal(payload.repoSlug, 'service-a');
+  assert.deepEqual(payload.reviewers, ['alice', 'bob']);
 
   const request = JSON.parse(readFileSync(join(runDir, 'stash-create-pr-request.json'), 'utf8'));
   assert.equal(request.title, '[agent-sdlc] feature config change (run-1)');
   assert.equal(request.sourceBranch, 'agent-sdlc/run-1');
   assert.equal(request.targetBranch, 'main');
+  assert.equal(request.projectKey, 'ABC');
+  assert.equal(request.repoSlug, 'service-a');
+  assert.equal(request.stashRestPayload.fromRef.repository.project.key, 'ABC');
+  assert.equal(request.stashRestPayload.fromRef.repository.slug, 'service-a');
+  assert.deepEqual(request.stashRestPayload.reviewers.map((reviewer) => reviewer.user.name), ['alice', 'bob']);
   assert.equal(request.policy.prCreationApprovalPresent, true);
   assert.deepEqual(request.changedFiles, ['src/main/resources/application.yml']);
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /create_pr_request_generated/);

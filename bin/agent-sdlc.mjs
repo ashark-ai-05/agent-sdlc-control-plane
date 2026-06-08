@@ -461,6 +461,30 @@ function loadOptionalText(path) {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 }
 
+function parseCsv(value) {
+  if (Array.isArray(value)) return value;
+  return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function prProviderFields({ args, manifest, contextPack, provider, sourceBranch, targetBranch }) {
+  const stash = manifest.stash || contextPack.stash || contextPack.bitbucket || {};
+  const projectKey = String(args['project-key'] || manifest.projectKey || contextPack.projectKey || stash.projectKey || 'TBD_PROJECT');
+  const repoSlug = String(args['repo-slug'] || manifest.repoSlug || contextPack.repoSlug || stash.repoSlug || 'TBD_REPO');
+  const reviewers = parseCsv(args.reviewers || manifest.reviewers || contextPack.reviewers || stash.reviewers).map((reviewer) => ({ user: { name: reviewer } }));
+  return {
+    projectKey,
+    repoSlug,
+    reviewers,
+    source: { branch: sourceBranch, refId: `refs/heads/${sourceBranch}` },
+    target: { branch: targetBranch, refId: `refs/heads/${targetBranch}` },
+    links: {
+      self: null,
+      web: null,
+    },
+    providerSchema: provider === 'stash' ? 'stash-rest-preview-v1' : 'bitbucket-rest-preview-v1',
+  };
+}
+
 function featureCreatePr(args) {
   const repo = resolve(String(args.repo || ''));
   const runId = String(args.run || '');
@@ -496,18 +520,49 @@ function featureCreatePr(args) {
     die(`refusing to run PR creation while checked out on protected branch: ${currentBranch}`);
   }
 
+  const providerFields = prProviderFields({ args, manifest, contextPack, provider, sourceBranch, targetBranch });
   const request = {
     provider,
     dryRun,
     runId,
     repository: root,
+    projectKey: providerFields.projectKey,
+    repoSlug: providerFields.repoSlug,
     sourceBranch,
     targetBranch,
+    source: providerFields.source,
+    target: providerFields.target,
+    reviewers: providerFields.reviewers,
     title,
     description: body,
     changedFiles,
     validation: validationSummary,
     confidence,
+    providerSchema: providerFields.providerSchema,
+    stashRestPayload: {
+      title,
+      description: body,
+      state: 'OPEN',
+      open: true,
+      closed: false,
+      fromRef: {
+        id: providerFields.source.refId,
+        displayId: providerFields.source.branch,
+        repository: {
+          slug: providerFields.repoSlug,
+          project: { key: providerFields.projectKey },
+        },
+      },
+      toRef: {
+        id: providerFields.target.refId,
+        displayId: providerFields.target.branch,
+        repository: {
+          slug: providerFields.repoSlug,
+          project: { key: providerFields.projectKey },
+        },
+      },
+      reviewers: providerFields.reviewers,
+    },
     policy: {
       prCreationApprovalRequired: true,
       prCreationApprovalPresent: true,
@@ -531,6 +586,9 @@ function featureCreatePr(args) {
     requestPath,
     sourceBranch,
     targetBranch,
+    projectKey: providerFields.projectKey,
+    repoSlug: providerFields.repoSlug,
+    reviewers: providerFields.reviewers.map((reviewer) => reviewer.user.name),
     title,
   }, null, 2));
 }
@@ -1405,7 +1463,7 @@ function daemonStart(args) {
 }
 
 function usage() {
-  console.log(`Usage:\n  agent-sdlc daemon start --repo <repo> [--host 127.0.0.1] [--port 4317]\n  agent-sdlc repo scan --repo <repo>\n  agent-sdlc policy validate --repo <repo>\n  agent-sdlc config validate --repo <repo> [--target-file <path>]\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc run list --repo <repo> [--json]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
+  console.log(`Usage:\n  agent-sdlc daemon start --repo <repo> [--host 127.0.0.1] [--port 4317]\n  agent-sdlc repo scan --repo <repo>\n  agent-sdlc policy validate --repo <repo>\n  agent-sdlc config validate --repo <repo> [--target-file <path>]\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc run list --repo <repo> [--json]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--project-key ABC] [--repo-slug service] [--reviewers alice,bob] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
 }
 
 const args = parseArgs(process.argv.slice(2));

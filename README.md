@@ -45,6 +45,9 @@ agent-sdlc feature create-pr \
   --repo /path/to/repo \
   --run <run-id> \
   --provider stash \
+  --project-key ABC \
+  --repo-slug service-a \
+  --reviewers alice,bob \
   --dry-run
 
 agent-sdlc feature enterprise-preview \
@@ -162,7 +165,7 @@ Additional preview artifacts:
 .agentic-sdlc/runs/<run-id>/review-checklist.md
 ```
 
-The `feature create-pr` command is a gated dry-run skeleton. It requires the preview artifacts and a `pr_creation` approval record, refuses failed validation unless `--allow-failed-validation` is supplied, refuses protected source/current branches, and writes the provider request payload without calling Bitbucket/Stash.
+The `feature create-pr` command is a gated dry-run skeleton. It requires the preview artifacts and a `pr_creation` approval record, refuses failed validation unless `--allow-failed-validation` is supplied, refuses protected source/current branches, and writes the provider request payload without calling Bitbucket/Stash. The request includes enterprise-friendly Stash/Bitbucket fields: `projectKey`, `repoSlug`, reviewers, source/target refs, and a `stashRestPayload` preview body.
 
 Dry-run request artifact:
 
