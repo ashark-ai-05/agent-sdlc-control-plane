@@ -5,6 +5,11 @@ Local-first Agentic SDLC workflow control CLI.
 Implemented MVP commands:
 
 ```bash
+agent-sdlc run init \
+  --repo /path/to/repo \
+  --run <run-id> \
+  --workflow-type feature_config_change
+
 agent-sdlc feature execute \
   --repo /path/to/repo \
   --run <run-id> \
@@ -67,6 +72,8 @@ The target repo must already contain:
 .agentic-sdlc/runs/<run-id>/context-pack.json
 .agentic-sdlc/runs/<run-id>/approvals.jsonl
 ```
+
+Use `agent-sdlc run init` to scaffold `manifest.json`, `context-pack.json`, and `events.jsonl` for a new run. It detects basic validation commands from common repo files (`pom.xml`, Gradle files, `package.json`, `go.mod`).
 
 `approvals.jsonl` must contain an approved implementation plan gate:
 

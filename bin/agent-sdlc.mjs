@@ -605,6 +605,82 @@ function featureApplyEnterpriseUpdates(args) {
   }, null, 2));
 }
 
+function detectValidationCommands(root) {
+  if (existsSync(join(root, 'pom.xml'))) return ['mvn test'];
+  if (existsSync(join(root, 'build.gradle')) || existsSync(join(root, 'build.gradle.kts'))) return ['./gradlew test'];
+  if (existsSync(join(root, 'package.json'))) {
+    const pkg = readJson(join(root, 'package.json'), {});
+    if (pkg.scripts?.test) return ['npm test'];
+  }
+  if (existsSync(join(root, 'go.mod'))) return ['go test ./...'];
+  return [];
+}
+
+function runInit(args) {
+  const repo = resolve(String(args.repo || ''));
+  const runId = String(args.run || '');
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  if (!runId) die('--run is required');
+
+  const gitRoot = git(repo, ['rev-parse', '--show-toplevel']);
+  if (!gitRoot.ok) die(`${repo} is not a git repository`);
+  const root = gitRoot.stdout.trim();
+  const runDir = join(root, '.agentic-sdlc', 'runs', runId);
+  mkdirSync(runDir, { recursive: true });
+
+  const currentBranch = git(root, ['branch', '--show-current']).stdout.trim() || 'main';
+  const workflowType = String(args['workflow-type'] || 'feature_config_change');
+  const baseBranch = String(args['base-branch'] || currentBranch || 'main');
+  const workingBranch = String(args['working-branch'] || `agent-sdlc/${runId}`);
+  const validationCommands = args['validation-command']
+    ? [String(args['validation-command'])]
+    : detectValidationCommands(root);
+
+  const manifestPath = join(runDir, 'manifest.json');
+  const contextPath = join(runDir, 'context-pack.json');
+  if (existsSync(manifestPath) && !args.force) die(`manifest.json already exists for ${runId}; use --force to overwrite`);
+
+  const manifest = {
+    manifestVersion: '0.1.0',
+    runId,
+    workflowType,
+    baseBranch,
+    workingBranch,
+    validationCommands,
+    createdAt: new Date().toISOString(),
+  };
+  const contextPack = {
+    runId,
+    workflowType,
+    repoPath: root,
+    baseBranch,
+    workingBranch,
+    validationCommands,
+    assumptions: [],
+    unknowns: ['implementation plan not generated yet'],
+    contextSufficiencyScore: 0.5,
+  };
+
+  writeJson(manifestPath, manifest);
+  writeJson(contextPath, contextPack);
+  const approvalPath = join(runDir, 'approvals.jsonl');
+  if (!existsSync(approvalPath) || args.force) writeFileSync(approvalPath, '');
+  appendJsonl(join(runDir, 'events.jsonl'), { type: 'run_initialized', runId, workflowType, baseBranch, workingBranch });
+
+  console.log(JSON.stringify({
+    runId,
+    repo: root,
+    state: 'waiting_plan_approval',
+    runDir,
+    artifacts: {
+      manifest: manifestPath,
+      contextPack: contextPath,
+      events: join(runDir, 'events.jsonl'),
+    },
+    nextRecommendedCommand: `agent-sdlc approval approve --repo ${root} --run ${runId} --gate implementation_plan --actor <name>`,
+  }, null, 2));
+}
+
 function artifactChecklist(runDir) {
   const names = [
     'manifest.json',
@@ -779,12 +855,13 @@ function approvalCommand(args, action) {
 }
 
 function usage() {
-  console.log(`Usage:\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
+  console.log(`Usage:\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
 }
 
 const args = parseArgs(process.argv.slice(2));
 const [domain, action] = args._;
-if (domain === 'feature' && action === 'execute') featureExecute(args);
+if (domain === 'run' && action === 'init') runInit(args);
+else if (domain === 'feature' && action === 'execute') featureExecute(args);
 else if (domain === 'feature' && action === 'pr-preview') featurePrPreview(args);
 else if (domain === 'feature' && action === 'create-pr') featureCreatePr(args);
 else if (domain === 'feature' && action === 'enterprise-preview') featureEnterprisePreview(args);

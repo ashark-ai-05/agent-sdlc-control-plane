@@ -225,3 +225,23 @@ test('approval commands list, approve, and reject gates with latest-state semant
   assert.equal(status.status, 0, status.stderr || status.stdout);
   assert.equal(JSON.parse(status.stdout).state, 'waiting_execution_approval');
 });
+
+test('run init scaffolds manifest and context pack with validation detection', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'agent-sdlc-init-'));
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }, null, 2));
+  sh(repo, 'git init -q && git config user.email test@example.com && git config user.name Test && git add package.json && git commit -q -m initial');
+
+  const result = spawnSync('node', [cli, 'run', 'init', '--repo', repo, '--run', 'new-run'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.state, 'waiting_plan_approval');
+
+  const runDir = join(repo, '.agentic-sdlc/runs/new-run');
+  const manifest = JSON.parse(readFileSync(join(runDir, 'manifest.json'), 'utf8'));
+  const context = JSON.parse(readFileSync(join(runDir, 'context-pack.json'), 'utf8'));
+  assert.equal(manifest.runId, 'new-run');
+  assert.deepEqual(manifest.validationCommands, ['npm test']);
+  assert.equal(context.contextSufficiencyScore, 0.5);
+  assert.ok(existsSync(join(runDir, 'approvals.jsonl')));
+  assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /run_initialized/);
+});
