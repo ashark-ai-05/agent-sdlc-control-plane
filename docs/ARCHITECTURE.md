@@ -55,10 +55,11 @@ request
 
 ### CLI
 
-Main entrypoint:
+Main source and entrypoint:
 
 ```text
-bin/agent-sdlc.mjs
+src/main.mjs          current implementation source
+bin/agent-sdlc.mjs   thin executable entrypoint
 ```
 
 Implements repo scan, config validation, policy validation, run initialization, approvals, controlled execution, PR preview, PR request dry-run, enterprise previews, audit report, and local daemon startup.
@@ -137,7 +138,7 @@ Real Stash/Jira/Confluence writes should only be added behind explicit configura
 
 ## Future architecture direction
 
-Recommended next major refactor:
+Recommended next module split after the initial `src/main.mjs` extraction:
 
 ```text
 bin/agent-sdlc.mjs          thin CLI entrypoint

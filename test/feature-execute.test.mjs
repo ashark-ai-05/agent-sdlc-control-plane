@@ -329,6 +329,13 @@ function waitForDaemon(child) {
   });
 }
 
+test('source code lives under src and bin is a thin entrypoint', () => {
+  assert.ok(existsSync(new URL('../src/main.mjs', import.meta.url).pathname));
+  const bin = readFileSync(cli, 'utf8');
+  assert.match(bin, /from '\.\.\/src\/main\.mjs'/);
+  assert.ok(bin.length < 500, 'bin entrypoint should stay thin; implementation belongs in src/');
+});
+
 test('daemon serves mission-control UI, status API, artifacts, and approval updates', async () => {
   const repo = makeRepo();
   const child = spawn('node', [cli, 'daemon', 'start', '--repo', repo, '--port', '0'], { encoding: 'utf8' });

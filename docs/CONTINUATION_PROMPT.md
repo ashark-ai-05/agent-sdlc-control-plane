@@ -26,7 +26,8 @@ Important design stance:
 - mission-control UI is local-only by default: `127.0.0.1`
 
 What already exists:
-- Node ESM CLI in `bin/agent-sdlc.mjs`
+- Source implementation in `src/main.mjs`
+- Thin executable entrypoint in `bin/agent-sdlc.mjs`
 - Tests in `test/feature-execute.test.mjs`
 - No runtime dependencies beyond Node >=20 and git
 - Current commands:
@@ -116,7 +117,7 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Split the single large CLI file into modules:
+1. Split `src/main.mjs` into smaller modules:
    - `src/cli/args.mjs`
    - `src/core/git.mjs`
    - `src/core/runs.mjs`

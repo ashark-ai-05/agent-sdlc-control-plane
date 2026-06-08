@@ -2,6 +2,13 @@
 
 Local-first Agentic SDLC workflow control CLI.
 
+Source code layout:
+
+```text
+src/main.mjs          # current implementation source
+bin/agent-sdlc.mjs   # thin executable entrypoint
+```
+
 Handoff docs for continuing on another PC:
 
 ```text
