@@ -5,6 +5,16 @@ Local-first Agentic SDLC workflow control CLI.
 Implemented MVP commands:
 
 ```bash
+agent-sdlc repo scan \
+  --repo /path/to/repo
+
+agent-sdlc policy validate \
+  --repo /path/to/repo
+
+agent-sdlc config validate \
+  --repo /path/to/repo \
+  --target-file service-a/src/main/resources/application.yml
+
 agent-sdlc run init \
   --repo /path/to/repo \
   --run <run-id> \
@@ -90,15 +100,19 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 ## Produced artifacts
 
 ```text
+.agentic-sdlc/repo-scan.json
+.agentic-sdlc/policy-validation.json
+.agentic-sdlc/config-validation.json
 .agentic-sdlc/runs/<run-id>/changed-files.json
 .agentic-sdlc/runs/<run-id>/diff.patch
 .agentic-sdlc/runs/<run-id>/maven-output.txt
+.agentic-sdlc/runs/<run-id>/config-validation.json
 .agentic-sdlc/runs/<run-id>/validation-summary.json
 .agentic-sdlc/runs/<run-id>/confidence.json
 .agentic-sdlc/runs/<run-id>/events.jsonl
 ```
 
-The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, applies a deterministic config change, captures diff and changed files, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
+The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, applies a deterministic config change, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
 
 For `.yaml`/`.yml` target files, dotted keys are written as nested YAML. For example `--set-key feature.enabled --set-value true` writes:
 
@@ -108,6 +122,12 @@ feature:
 ```
 
 Policy config is loaded from `.agentic-sdlc/policy.json` when present. It controls protected branches and validation gating defaults.
+
+The `repo scan` command writes `.agentic-sdlc/repo-scan.json` with current branch, branches, remotes, detected stack, detected validation commands, tracked/scanned/config/dirty file counts, config files, dirty files, and policy presence.
+
+The `policy validate` command writes `.agentic-sdlc/policy-validation.json` with the effective policy, hard errors, and warnings for weakened safety settings.
+
+The `config validate` command writes `.agentic-sdlc/config-validation.json` for one target file or all detected config files. It validates JSON parsing and basic YAML/properties/TOML shape without external dependencies.
 
 The `feature pr-preview` command reads the execution artifacts and generates PR preview artifacts only. It does not push branches, create PRs, or write to enterprise systems.
 

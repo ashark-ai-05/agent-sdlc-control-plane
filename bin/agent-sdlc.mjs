@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -306,7 +306,11 @@ function featureExecute(args) {
   const relativeTarget = relative(root, absoluteTarget);
   if (relativeTarget.startsWith('..')) die('--target-file must stay inside repo');
   applyConfigChange(absoluteTarget, setKey, setValue, runId);
+  const configValidation = validateConfigFile(absoluteTarget);
+  configValidation.file = relativeTarget;
+  writeJson(join(runDir, 'config-validation.json'), configValidation);
   appendJsonl(eventsPath, { type: 'mock_config_change_applied', file: relativeTarget, key: setKey, value: setValue });
+  appendJsonl(eventsPath, { type: 'config_validation_completed', ok: configValidation.ok, file: relativeTarget, errors: configValidation.errors });
 
   const changed = git(root, ['diff', '--name-only']).stdout.split('\n').filter(Boolean);
   const diff = git(root, ['diff', '--', ...changed]);
@@ -318,7 +322,8 @@ function featureExecute(args) {
   const mavenOutput = validationRuns.map((r) => `$ ${r.command}\nexit=${r.status}\n${r.stdout}${r.stderr}`).join('\n---\n');
   writeFileSync(join(runDir, 'maven-output.txt'), mavenOutput);
   const validationSummary = {
-    ok: validationRuns.every((r) => r.ok),
+    ok: configValidation.ok && validationRuns.every((r) => r.ok),
+    configValidation,
     commands: validationRuns.map(({ command, status, ok }) => ({ command, status, ok })),
   };
   writeJson(join(runDir, 'validation-summary.json'), validationSummary);
@@ -692,6 +697,207 @@ function detectValidationCommands(root) {
   return [];
 }
 
+function detectRepoStack(root) {
+  const stack = [];
+  if (existsSync(join(root, 'pom.xml'))) stack.push('maven');
+  if (existsSync(join(root, 'build.gradle')) || existsSync(join(root, 'build.gradle.kts'))) stack.push('gradle');
+  if (existsSync(join(root, 'package.json'))) stack.push('node');
+  if (existsSync(join(root, 'go.mod'))) stack.push('go');
+  if (existsSync(join(root, 'requirements.txt')) || existsSync(join(root, 'pyproject.toml'))) stack.push('python');
+  return stack;
+}
+
+function listTrackedFiles(root) {
+  const result = git(root, ['ls-files']);
+  if (!result.ok) return [];
+  return result.stdout.split('\n').filter(Boolean);
+}
+
+function walkFiles(root, options = {}) {
+  const ignored = new Set(options.ignored || ['.git', 'node_modules', 'target', 'dist', 'build']);
+  const limit = options.limit || 5000;
+  const files = [];
+  function walk(dir) {
+    if (files.length >= limit) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (ignored.has(entry.name)) continue;
+      const full = join(dir, entry.name);
+      const rel = relative(root, full);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) files.push(rel);
+      if (files.length >= limit) return;
+    }
+  }
+  walk(root);
+  return files;
+}
+
+function isConfigPath(path) {
+  const lower = path.toLowerCase();
+  return lower.endsWith('.json') || lower.endsWith('.yml') || lower.endsWith('.yaml') || lower.endsWith('.properties') || lower.endsWith('.toml');
+}
+
+function basicYamlValidation(text) {
+  const errors = [];
+  const stack = [];
+  const lines = text.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    if (!line.trim() || line.trim().startsWith('#')) return;
+    const indent = line.match(/^ */)[0].length;
+    if (indent % 2 !== 0) errors.push(`line ${index + 1}: indentation should use multiples of two spaces`);
+    const trimmed = line.trim();
+    if (trimmed.includes('\t')) errors.push(`line ${index + 1}: tabs are not allowed in YAML indentation`);
+    if (!trimmed.startsWith('- ') && !trimmed.includes(':')) errors.push(`line ${index + 1}: expected key/value separator ':'`);
+    while (stack.length && stack.at(-1).indent >= indent) stack.pop();
+    if (/^[^:#][^:]*:\s*$/.test(trimmed)) stack.push({ indent, key: trimmed.slice(0, -1) });
+  });
+  return errors;
+}
+
+function validateConfigFile(path) {
+  const lower = path.toLowerCase();
+  const text = readFileSync(path, 'utf8');
+  const result = { file: path, ok: true, type: 'unknown', errors: [] };
+  try {
+    if (lower.endsWith('.json')) {
+      result.type = 'json';
+      JSON.parse(text || '{}');
+    } else if (lower.endsWith('.yml') || lower.endsWith('.yaml')) {
+      result.type = 'yaml';
+      result.errors.push(...basicYamlValidation(text));
+    } else if (lower.endsWith('.properties')) {
+      result.type = 'properties';
+      text.split(/\r?\n/).forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) return;
+        if (!trimmed.includes('=') && !trimmed.includes(':')) result.errors.push(`line ${index + 1}: expected key=value or key:value`);
+      });
+    } else if (lower.endsWith('.toml')) {
+      result.type = 'toml';
+      text.split(/\r?\n/).forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('[')) return;
+        if (!trimmed.includes('=')) result.errors.push(`line ${index + 1}: expected key=value`);
+      });
+    }
+  } catch (error) {
+    result.errors.push(error.message);
+  }
+  result.ok = result.errors.length === 0;
+  return result;
+}
+
+function validatePolicyShape(policy) {
+  const errors = [];
+  const warnings = [];
+  if (!policy.policyVersion) warnings.push('policyVersion missing; default will be used at runtime');
+  if (!Array.isArray(policy.protectedBranches) || policy.protectedBranches.length === 0) errors.push('protectedBranches must be a non-empty array');
+  if (!Array.isArray(policy.disallowedActions)) errors.push('disallowedActions must be an array');
+  for (const action of ['merge_pr', 'deploy', 'production_mutation']) {
+    if (!policy.disallowedActions?.includes(action)) warnings.push(`disallowedActions should include ${action}`);
+  }
+  for (const flag of ['validationMustPassForPr', 'enterpriseWritesRequireApproval']) {
+    if (typeof policy[flag] !== 'boolean') errors.push(`${flag} must be boolean`);
+  }
+  if (policy.validationMustPassForPr === false) warnings.push('validationMustPassForPr=false weakens PR safety gate');
+  if (policy.enterpriseWritesRequireApproval === false) warnings.push('enterpriseWritesRequireApproval=false weakens enterprise write gate');
+  return { ok: errors.length === 0, errors, warnings };
+}
+
+function repoScan(args) {
+  const repo = resolve(String(args.repo || ''));
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  const gitRoot = git(repo, ['rev-parse', '--show-toplevel']);
+  if (!gitRoot.ok) die(`${repo} is not a git repository`);
+  const root = gitRoot.stdout.trim();
+  const trackedFiles = listTrackedFiles(root);
+  const allFiles = trackedFiles.length ? trackedFiles : walkFiles(root);
+  const configFiles = allFiles.filter(isConfigPath).sort();
+  const dirtyFiles = git(root, ['status', '--short']).stdout.split('\n').filter(Boolean).map((line) => line.slice(3));
+  const remotes = git(root, ['remote', '-v']).stdout.split('\n').filter(Boolean);
+  const branches = git(root, ['branch', '--format=%(refname:short)']).stdout.split('\n').filter(Boolean);
+  const currentBranch = git(root, ['branch', '--show-current']).stdout.trim();
+  const scan = {
+    scannedAt: new Date().toISOString(),
+    repo: root,
+    currentBranch,
+    branches,
+    remotes,
+    stack: detectRepoStack(root),
+    validationCommands: detectValidationCommands(root),
+    fileCounts: {
+      tracked: trackedFiles.length,
+      scanned: allFiles.length,
+      config: configFiles.length,
+      dirty: dirtyFiles.length,
+    },
+    totalTrackedBytes: allFiles.reduce((sum, file) => {
+      try { return sum + statSync(join(root, file)).size; } catch { return sum; }
+    }, 0),
+    configFiles,
+    dirtyFiles,
+    policyPresent: existsSync(join(root, '.agentic-sdlc', 'policy.json')),
+  };
+  const outPath = join(root, '.agentic-sdlc', 'repo-scan.json');
+  writeJson(outPath, scan);
+  console.log(JSON.stringify({ ...scan, artifact: outPath }, null, 2));
+}
+
+function policyValidate(args) {
+  const repo = resolve(String(args.repo || ''));
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  const gitRoot = git(repo, ['rev-parse', '--show-toplevel']);
+  if (!gitRoot.ok) die(`${repo} is not a git repository`);
+  const root = gitRoot.stdout.trim();
+  const policyPath = join(root, '.agentic-sdlc', 'policy.json');
+  const policy = loadPolicy(root);
+  const shape = validatePolicyShape(policy);
+  const payload = {
+    validatedAt: new Date().toISOString(),
+    repo: root,
+    policyPath,
+    policyPresent: existsSync(policyPath),
+    ok: shape.ok,
+    errors: shape.errors,
+    warnings: shape.warnings,
+    effectivePolicy: policy,
+  };
+  const outPath = join(root, '.agentic-sdlc', 'policy-validation.json');
+  writeJson(outPath, payload);
+  console.log(JSON.stringify({ ...payload, artifact: outPath }, null, 2));
+  if (!payload.ok) process.exit(1);
+}
+
+function configValidate(args) {
+  const repo = resolve(String(args.repo || ''));
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  const gitRoot = git(repo, ['rev-parse', '--show-toplevel']);
+  if (!gitRoot.ok) die(`${repo} is not a git repository`);
+  const root = gitRoot.stdout.trim();
+  const files = args['target-file']
+    ? [String(args['target-file'])]
+    : (listTrackedFiles(root).length ? listTrackedFiles(root) : walkFiles(root)).filter(isConfigPath);
+  const results = files.map((file) => {
+    const absolute = resolve(root, file);
+    const rel = relative(root, absolute);
+    if (rel.startsWith('..') || !existsSync(absolute)) return { file, ok: false, type: 'unknown', errors: ['file missing or outside repository'] };
+    const result = validateConfigFile(absolute);
+    result.file = rel;
+    return result;
+  });
+  const payload = {
+    validatedAt: new Date().toISOString(),
+    repo: root,
+    ok: results.every((result) => result.ok),
+    filesChecked: results.length,
+    results,
+  };
+  const outPath = join(root, '.agentic-sdlc', 'config-validation.json');
+  writeJson(outPath, payload);
+  console.log(JSON.stringify({ ...payload, artifact: outPath }, null, 2));
+  if (!payload.ok) process.exit(1);
+}
+
 function runInit(args) {
   const repo = resolve(String(args.repo || ''));
   const runId = String(args.run || '');
@@ -768,6 +974,7 @@ function artifactChecklist(runDir) {
     'changed-files.json',
     'diff.patch',
     'maven-output.txt',
+    'config-validation.json',
     'validation-summary.json',
     'confidence.json',
     'pr-preview.md',
@@ -961,12 +1168,15 @@ function approvalCommand(args, action) {
 }
 
 function usage() {
-  console.log(`Usage:\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
+  console.log(`Usage:\n  agent-sdlc repo scan --repo <repo>\n  agent-sdlc policy validate --repo <repo>\n  agent-sdlc config validate --repo <repo> [--target-file <path>]\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
 }
 
 const args = parseArgs(process.argv.slice(2));
 const [domain, action] = args._;
-if (domain === 'run' && action === 'init') runInit(args);
+if (domain === 'repo' && action === 'scan') repoScan(args);
+else if (domain === 'policy' && action === 'validate') policyValidate(args);
+else if (domain === 'config' && action === 'validate') configValidate(args);
+else if (domain === 'run' && action === 'init') runInit(args);
 else if (domain === 'feature' && action === 'execute') featureExecute(args);
 else if (domain === 'feature' && action === 'pr-preview') featurePrPreview(args);
 else if (domain === 'feature' && action === 'create-pr') featureCreatePr(args);

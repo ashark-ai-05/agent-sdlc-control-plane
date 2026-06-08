@@ -49,6 +49,7 @@ test('feature execute applies controlled config change and persists artifacts', 
   assert.match(readFileSync(join(runDir, 'diff.patch'), 'utf8'), /agent-sdlc mock config change/);
   assert.ok(existsSync(join(runDir, 'changed-files.json')));
   assert.ok(existsSync(join(runDir, 'maven-output.txt')));
+  assert.ok(existsSync(join(runDir, 'config-validation.json')));
   assert.ok(existsSync(join(runDir, 'validation-summary.json')));
   assert.ok(existsSync(join(runDir, 'confidence.json')));
 });
@@ -260,4 +261,37 @@ test('run audit-report writes markdown audit report', () => {
   assert.match(report, /## Gates/);
   assert.match(report, /## Artifact checklist/);
   assert.match(report, /## Event timeline/);
+});
+
+test('repo scan, policy validate, and config validate persist safety artifacts', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'agent-sdlc-scan-'));
+  mkdirSync(join(repo, 'src/main/resources'), { recursive: true });
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }, null, 2));
+  writeFileSync(join(repo, 'src/main/resources/application.yml'), 'app:\n  name: demo\n');
+  sh(repo, 'git init -q && git config user.email test@example.com && git config user.name Test && git add package.json src/main/resources/application.yml && git commit -q -m initial');
+  const init = spawnSync('node', [cli, 'run', 'init', '--repo', repo, '--run', 'scan-run'], { encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr || init.stdout);
+
+  const scan = spawnSync('node', [cli, 'repo', 'scan', '--repo', repo], { encoding: 'utf8' });
+  assert.equal(scan.status, 0, scan.stderr || scan.stdout);
+  const scanPayload = JSON.parse(scan.stdout);
+  assert.deepEqual(scanPayload.stack, ['node']);
+  assert.deepEqual(scanPayload.validationCommands, ['npm test']);
+  assert.ok(scanPayload.configFiles.includes('package.json'));
+  assert.ok(existsSync(join(repo, '.agentic-sdlc/repo-scan.json')));
+
+  const policy = spawnSync('node', [cli, 'policy', 'validate', '--repo', repo], { encoding: 'utf8' });
+  assert.equal(policy.status, 0, policy.stderr || policy.stdout);
+  const policyPayload = JSON.parse(policy.stdout);
+  assert.equal(policyPayload.ok, true);
+  assert.equal(policyPayload.policyPresent, true);
+  assert.ok(existsSync(join(repo, '.agentic-sdlc/policy-validation.json')));
+
+  const config = spawnSync('node', [cli, 'config', 'validate', '--repo', repo, '--target-file', 'src/main/resources/application.yml'], { encoding: 'utf8' });
+  assert.equal(config.status, 0, config.stderr || config.stdout);
+  const configPayload = JSON.parse(config.stdout);
+  assert.equal(configPayload.ok, true);
+  assert.equal(configPayload.filesChecked, 1);
+  assert.equal(configPayload.results[0].type, 'yaml');
+  assert.ok(existsSync(join(repo, '.agentic-sdlc/config-validation.json')));
 });
