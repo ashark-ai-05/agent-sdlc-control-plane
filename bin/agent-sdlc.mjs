@@ -1061,6 +1061,35 @@ function buildRunStatusPayload(repo, runId) {
   };
 }
 
+function buildRunListPayload(repo) {
+  const root = resolveGitRoot(repo);
+  const runs = listRunIds(root).map((runId) => {
+    try { return buildRunStatusPayload(root, runId); }
+    catch (error) { return { runId, repo: root, state: 'unreadable', error: error.message }; }
+  });
+  const summary = runs.reduce((acc, run) => {
+    acc.total += 1;
+    acc.byState[run.state] = (acc.byState[run.state] || 0) + 1;
+    return acc;
+  }, { total: 0, byState: {} });
+  return { repo: root, runs, summary };
+}
+
+function runList(args) {
+  const repo = resolve(String(args.repo || ''));
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  const payload = buildRunListPayload(repo);
+  if (args.json) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+  console.log(`Repo: ${payload.repo}`);
+  console.log(`Runs: ${payload.summary.total}`);
+  for (const run of payload.runs) {
+    console.log(`${run.runId}\t${run.state}\t${run.workflowType || 'unknown'}\t${run.nextRecommendedCommand || ''}`);
+  }
+}
+
 function runStatus(args) {
   const repo = resolve(String(args.repo || ''));
   const runId = String(args.run || '');
@@ -1329,10 +1358,7 @@ async function handleDaemonRequest(req, res, root) {
       return sendJson(res, 200, { ...scan, artifact });
     }
     if (req.method === 'GET' && url.pathname === '/api/runs') {
-      const runs = listRunIds(root).map((runId) => {
-        try { return buildRunStatusPayload(root, runId); } catch { return { runId, state: 'unreadable' }; }
-      });
-      return sendJson(res, 200, { repo: root, runs });
+      return sendJson(res, 200, buildRunListPayload(root));
     }
     if (segments[0] === 'api' && segments[1] === 'runs' && segments[2]) {
       const runId = segments[2];
@@ -1379,7 +1405,7 @@ function daemonStart(args) {
 }
 
 function usage() {
-  console.log(`Usage:\n  agent-sdlc daemon start --repo <repo> [--host 127.0.0.1] [--port 4317]\n  agent-sdlc repo scan --repo <repo>\n  agent-sdlc policy validate --repo <repo>\n  agent-sdlc config validate --repo <repo> [--target-file <path>]\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
+  console.log(`Usage:\n  agent-sdlc daemon start --repo <repo> [--host 127.0.0.1] [--port 4317]\n  agent-sdlc repo scan --repo <repo>\n  agent-sdlc policy validate --repo <repo>\n  agent-sdlc config validate --repo <repo> [--target-file <path>]\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc run list --repo <repo> [--json]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -1389,6 +1415,7 @@ else if (domain === 'repo' && action === 'scan') repoScan(args);
 else if (domain === 'policy' && action === 'validate') policyValidate(args);
 else if (domain === 'config' && action === 'validate') configValidate(args);
 else if (domain === 'run' && action === 'init') runInit(args);
+else if (domain === 'run' && action === 'list') runList(args);
 else if (domain === 'feature' && action === 'execute') featureExecute(args);
 else if (domain === 'feature' && action === 'pr-preview') featurePrPreview(args);
 else if (domain === 'feature' && action === 'create-pr') featureCreatePr(args);

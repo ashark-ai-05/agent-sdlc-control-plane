@@ -24,6 +24,10 @@ agent-sdlc run init \
   --run <run-id> \
   --workflow-type feature_config_change
 
+agent-sdlc run list \
+  --repo /path/to/repo \
+  --json
+
 agent-sdlc feature execute \
   --repo /path/to/repo \
   --run <run-id> \
@@ -186,6 +190,8 @@ Enterprise apply request artifacts:
 ```
 
 The `run status` command provides a mission-control-friendly snapshot of one run: inferred state, approved/missing gates, artifact checklist, validation status, confidence score, changed files, and the next recommended command. Use `--json` for UI/API consumption.
+
+The `run list` command summarizes all local run directories with state, workflow, gates, validation, confidence, artifact checklist, and next command. Use `--json` for mission-control/API consumption.
 
 The `approval` commands manage `approvals.jsonl` without manual editing. Latest record wins per gate, so a later reject supersedes an earlier approve.
 

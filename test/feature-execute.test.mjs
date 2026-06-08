@@ -204,6 +204,13 @@ test('run status summarizes state, gates, artifacts, validation, confidence, and
   assert.equal(textResult.status, 0, textResult.stderr || textResult.stdout);
   assert.match(textResult.stdout, /State: ready_to_apply_enterprise_updates/);
   assert.match(textResult.stdout, /Next: agent-sdlc feature apply-enterprise-updates/);
+
+  const listResult = spawnSync('node', [cli, 'run', 'list', '--repo', repo, '--json'], { encoding: 'utf8' });
+  assert.equal(listResult.status, 0, listResult.stderr || listResult.stdout);
+  const listPayload = JSON.parse(listResult.stdout);
+  assert.equal(listPayload.summary.total, 1);
+  assert.equal(listPayload.summary.byState.ready_to_apply_enterprise_updates, 1);
+  assert.equal(listPayload.runs[0].runId, 'run-1');
 });
 
 test('approval commands list, approve, and reject gates with latest-state semantics', () => {
