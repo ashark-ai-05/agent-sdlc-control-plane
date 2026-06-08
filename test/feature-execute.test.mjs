@@ -360,8 +360,25 @@ test('daemon serves mission-control UI, status API, artifacts, and approval upda
     }).then((res) => res.json());
     assert.equal(approval.status, 'approved');
 
+    const audit = await fetch(`${baseUrl}/api/runs/run-1/actions/audit-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }).then((res) => res.json());
+    assert.equal(audit.action, 'audit-report');
+    assert.equal(audit.state.artifacts.find((artifact) => artifact.name === 'audit-report.md').present, true);
+
+    const prRequest = await fetch(`${baseUrl}/api/runs/run-1/actions/create-pr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectKey: 'ABC', repoSlug: 'service-a', reviewers: ['alice'] }),
+    }).then((res) => res.json());
+    assert.equal(prRequest.action, 'create-pr');
+    assert.equal(prRequest.result.projectKey, 'ABC');
+
     const updated = await fetch(`${baseUrl}/api/runs/run-1/status`).then((res) => res.json());
     assert.ok(updated.gates.approved.includes('pr_creation'));
+    assert.ok(updated.artifacts.some((artifact) => artifact.name === 'stash-create-pr-request.json' && artifact.present));
   } finally {
     child.kill('SIGTERM');
   }

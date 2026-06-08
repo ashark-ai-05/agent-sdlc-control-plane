@@ -1293,6 +1293,26 @@ function readRequestJson(req) {
   });
 }
 
+function runCliAction(root, runId, action, body = {}) {
+  const baseArgs = ['--repo', root, '--run', runId];
+  const actionArgs = {
+    'pr-preview': ['feature', 'pr-preview', ...baseArgs],
+    'audit-report': ['run', 'audit-report', ...baseArgs],
+    'create-pr': ['feature', 'create-pr', ...baseArgs, '--provider', String(body.provider || 'stash'), '--project-key', String(body.projectKey || body['project-key'] || 'TBD_PROJECT'), '--repo-slug', String(body.repoSlug || body['repo-slug'] || 'TBD_REPO'), '--reviewers', parseCsv(body.reviewers).join(','), '--dry-run'],
+    'enterprise-preview': ['feature', 'enterprise-preview', ...baseArgs, '--jira-key', String(body.jiraKey || body['jira-key'] || 'TBD-JIRA'), '--confluence-page-id', String(body.confluencePageId || body['confluence-page-id'] || 'TBD-CONFLUENCE-PAGE')],
+    'apply-enterprise-updates': ['feature', 'apply-enterprise-updates', ...baseArgs, '--dry-run'],
+  };
+  const args = actionArgs[action];
+  if (!args) return { ok: false, status: 400, payload: { error: `unsupported action: ${action}` } };
+  if (body.allowFailedValidation || body['allow-failed-validation']) args.push('--allow-failed-validation');
+  const result = spawnSync(process.execPath, [process.argv[1], ...args], { cwd: root, encoding: 'utf8' });
+  let payload;
+  try { payload = JSON.parse(result.stdout || '{}'); }
+  catch { payload = { stdout: result.stdout }; }
+  if (result.status !== 0) return { ok: false, status: 400, payload: { error: result.stderr || result.stdout || `action failed: ${action}`, action, exitStatus: result.status } };
+  return { ok: true, status: 200, payload: { action, result: payload, state: buildRunStatusPayload(root, runId) } };
+}
+
 function listRunIds(root) {
   const runsRoot = join(root, '.agentic-sdlc', 'runs');
   if (!existsSync(runsRoot)) return [];
@@ -1350,6 +1370,14 @@ function missionControlHtml() {
         <button onclick="approveGate()">Approve</button>
         <button class="danger" onclick="rejectGate()">Reject</button>
       </div>
+      <h3>Workflow actions</h3>
+      <div class="row">
+        <button onclick="runAction('pr-preview')">Generate PR preview</button>
+        <button onclick="runAction('audit-report')">Audit report</button>
+        <button onclick="runAction('create-pr')">Create PR request</button>
+        <button onclick="runAction('enterprise-preview')">Enterprise preview</button>
+        <button onclick="runAction('apply-enterprise-updates')">Enterprise apply request</button>
+      </div>
       <h3>Artifacts</h3>
       <div id="artifacts"></div>
       <h3>Raw status</h3>
@@ -1395,6 +1423,13 @@ async function rejectGate() {
   await selectRun(selectedRun);
 }
 async function scanRepo() { document.getElementById('raw').textContent = JSON.stringify(await api('/api/repo/scan'), null, 2); }
+async function runAction(action) {
+  if (!selectedRun) return alert('select a run first');
+  const payload = action === 'create-pr' ? { projectKey: 'TBD_PROJECT', repoSlug: 'TBD_REPO', reviewers: [] } : {};
+  const result = await api('/api/runs/' + encodeURIComponent(selectedRun) + '/actions/' + encodeURIComponent(action), { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  document.getElementById('raw').textContent = JSON.stringify(result, null, 2);
+  await selectRun(selectedRun);
+}
 refresh().catch(e => { document.getElementById('raw').textContent = e.stack || String(e); });
 </script>
 </body>
@@ -1429,6 +1464,11 @@ async function handleDaemonRequest(req, res, root) {
         if (rel.startsWith('..') || !existsSync(artifactPath)) return sendJson(res, 404, { error: 'artifact not found' });
         const contentType = artifactName.endsWith('.json') || artifactName.endsWith('.jsonl') ? 'application/json; charset=utf-8' : artifactName.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8';
         return sendText(res, 200, readFileSync(artifactPath, 'utf8'), contentType);
+      }
+      if (req.method === 'POST' && segments[3] === 'actions' && segments[4]) {
+        const body = await readRequestJson(req);
+        const result = runCliAction(root, runId, segments[4], body);
+        return sendJson(res, result.status, result.payload);
       }
       if (req.method === 'POST' && segments[3] === 'approvals') {
         const body = await readRequestJson(req);

@@ -149,10 +149,11 @@ GET  /api/repo/scan
 GET  /api/runs
 GET  /api/runs/<run-id>/status
 GET  /api/runs/<run-id>/artifacts/<artifact-name>
+POST /api/runs/<run-id>/actions/<action>
 POST /api/runs/<run-id>/approvals
 ```
 
-The daemon is local-only by default (`127.0.0.1`) and writes the same approval JSONL records as the CLI.
+The daemon is local-only by default (`127.0.0.1`) and writes the same approval JSONL records as the CLI. Supported action names are `pr-preview`, `audit-report`, `create-pr`, `enterprise-preview`, and `apply-enterprise-updates`; each action shells back through the CLI and returns the resulting status/artifacts.
 
 The `feature pr-preview` command reads the execution artifacts and generates PR preview artifacts only. It does not push branches, create PRs, or write to enterprise systems.
 
