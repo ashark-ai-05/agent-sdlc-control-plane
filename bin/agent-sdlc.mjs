@@ -30,6 +30,23 @@ function readJson(path, fallback = undefined) {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
+function defaultPolicy() {
+  return {
+    policyVersion: '0.1.0',
+    protectedBranches: ['main', 'master'],
+    requireCleanWorkingTreeBeforeExecute: false,
+    validationMustPassForPr: true,
+    allowFailedValidationOverride: true,
+    enterpriseWritesRequireApproval: true,
+    disallowedActions: ['merge_pr', 'deploy', 'production_mutation'],
+  };
+}
+
+function loadPolicy(root) {
+  const policyPath = join(root, '.agentic-sdlc', 'policy.json');
+  return { ...defaultPolicy(), ...(readJson(policyPath, {}) || {}) };
+}
+
 function writeJson(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -102,6 +119,70 @@ function setDeep(obj, dottedKey, rawValue) {
   cursor[parts.at(-1)] = stringifyScalar(rawValue);
 }
 
+function formatYamlScalar(raw) {
+  const value = stringifyScalar(raw);
+  if (typeof value === 'boolean' || typeof value === 'number' || value === null) return String(value);
+  if (/^[A-Za-z0-9_./:-]+$/.test(String(value))) return String(value);
+  return JSON.stringify(String(value));
+}
+
+function setYamlValue(text, dottedKey, rawValue, runId) {
+  const parts = dottedKey.split('.').filter(Boolean);
+  if (!parts.length) die('--set-key must not be empty');
+  const lines = text.split(/\r?\n/).filter((line, idx, arr) => !(idx === arr.length - 1 && line === ''));
+  const valueText = formatYamlScalar(rawValue);
+
+  function findKey(start, end, indent, key) {
+    const re = new RegExp(`^\\s{${indent}}${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`);
+    for (let i = start; i < end; i++) {
+      if (re.test(lines[i])) return i;
+    }
+    return -1;
+  }
+
+  function blockEnd(start, indent) {
+    let i = start + 1;
+    for (; i < lines.length; i++) {
+      if (!lines[i].trim() || lines[i].trim().startsWith('#')) continue;
+      const currentIndent = lines[i].match(/^ */)[0].length;
+      if (currentIndent <= indent) break;
+    }
+    return i;
+  }
+
+  let start = 0;
+  let end = lines.length;
+  let indent = 0;
+  let insertAt = lines.length;
+  for (let depth = 0; depth < parts.length; depth++) {
+    const key = parts[depth];
+    const idx = findKey(start, end, indent, key);
+    const isLeaf = depth === parts.length - 1;
+    if (idx >= 0) {
+      if (isLeaf) {
+        lines[idx] = `${' '.repeat(indent)}${key}: ${valueText}`;
+        return `${lines.join('\n')}\n`;
+      }
+      start = idx + 1;
+      end = blockEnd(idx, indent);
+      insertAt = end;
+      indent += 2;
+      continue;
+    }
+    const newLines = [];
+    if (!lines.some((line) => line.includes(`agent-sdlc mock config change for ${runId}`))) {
+      newLines.push(`${' '.repeat(indent)}# agent-sdlc mock config change for ${runId}`);
+    }
+    for (let j = depth; j < parts.length; j++) {
+      const isFinal = j === parts.length - 1;
+      newLines.push(`${' '.repeat(indent + (j - depth) * 2)}${parts[j]}:${isFinal ? ` ${valueText}` : ''}`);
+    }
+    lines.splice(insertAt, 0, ...newLines);
+    return `${lines.join('\n')}\n`;
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 function applyConfigChange(targetPath, key, value, runId) {
   if (!existsSync(targetPath)) die(`target file does not exist: ${targetPath}`);
   const before = readFileSync(targetPath, 'utf8');
@@ -119,13 +200,7 @@ function applyConfigChange(targetPath, key, value, runId) {
     else lines.push(`# agent-sdlc mock config change for ${runId}`, `${key}=${value}`);
     after = `${lines.join('\n')}\n`;
   } else if (lower.endsWith('.yml') || lower.endsWith('.yaml')) {
-    const lines = before.split(/\r?\n/).filter((line, idx, arr) => !(idx === arr.length - 1 && line === ''));
-    const topLevelKey = key.includes('.') ? key : key;
-    const flatLine = `${topLevelKey}: ${value}`;
-    const idx = lines.findIndex((line) => line.trim().startsWith(`${topLevelKey}:`));
-    if (idx >= 0) lines[idx] = flatLine;
-    else lines.push(`# agent-sdlc mock config change for ${runId}`, flatLine);
-    after = `${lines.join('\n')}\n`;
+    after = setYamlValue(before, key, value, runId);
   } else {
     after = `${before.replace(/\s*$/, '\n')}# agent-sdlc mock config change for ${runId}\n${key}=${value}\n`;
   }
@@ -367,8 +442,8 @@ function featurePrPreview(args) {
   }, null, 2));
 }
 
-function isProtectedBranch(branch) {
-  return ['main', 'master'].includes(String(branch || '').trim());
+function isProtectedBranch(branch, policy = defaultPolicy()) {
+  return (policy.protectedBranches || ['main', 'master']).includes(String(branch || '').trim());
 }
 
 function requireFile(path, label) {
@@ -390,6 +465,7 @@ function featureCreatePr(args) {
   if (provider !== 'stash' && provider !== 'bitbucket') die('--provider currently supports stash or bitbucket only');
 
   const { root, runDir, manifest, contextPack, approvalPath, eventsPath } = loadRun(repo, runId);
+  const policy = loadPolicy(root);
   const title = firstLine(requireFile(join(runDir, 'pr-title.txt'), 'pr-title.txt'), `[agent-sdlc] ${runId}`);
   const body = requireFile(join(runDir, 'pr-body.md'), 'pr-body.md');
   requireFile(join(runDir, 'pr-preview.md'), 'pr-preview.md');
@@ -401,16 +477,16 @@ function featureCreatePr(args) {
   if (!hasApproval(approvalPath, 'pr_creation')) {
     die(`pr_creation approval missing in ${approvalPath}`);
   }
-  if (!validationSummary.ok && !args['allow-failed-validation']) {
+  if (!validationSummary.ok && policy.validationMustPassForPr && !args['allow-failed-validation']) {
     die('validation failed or unavailable; use --allow-failed-validation only after explicit approval');
   }
 
   const sourceBranch = manifest.workingBranch || git(root, ['branch', '--show-current']).stdout.trim();
   const targetBranch = manifest.baseBranch || contextPack.baseBranch || 'main';
-  if (isProtectedBranch(sourceBranch)) die(`refusing to create PR from protected branch: ${sourceBranch}`);
+  if (isProtectedBranch(sourceBranch, policy)) die(`refusing to create PR from protected branch: ${sourceBranch}`);
 
   const currentBranch = git(root, ['branch', '--show-current']).stdout.trim();
-  if (isProtectedBranch(currentBranch)) {
+  if (isProtectedBranch(currentBranch, policy)) {
     die(`refusing to run PR creation while checked out on protected branch: ${currentBranch}`);
   }
 
@@ -430,9 +506,9 @@ function featureCreatePr(args) {
       prCreationApprovalRequired: true,
       prCreationApprovalPresent: true,
       validationMustPassUnlessOverridden: !args['allow-failed-validation'],
-      protectedSourceBranchesRejected: ['main', 'master'],
-      mergeNotAllowed: true,
-      deployNotAllowed: true,
+      protectedSourceBranchesRejected: policy.protectedBranches || ['main', 'master'],
+      mergeNotAllowed: policy.disallowedActions?.includes('merge_pr') ?? true,
+      deployNotAllowed: policy.disallowedActions?.includes('deploy') ?? true,
     },
   };
 
@@ -626,6 +702,7 @@ function runInit(args) {
   if (!gitRoot.ok) die(`${repo} is not a git repository`);
   const root = gitRoot.stdout.trim();
   const runDir = join(root, '.agentic-sdlc', 'runs', runId);
+  const policyPath = join(root, '.agentic-sdlc', 'policy.json');
   mkdirSync(runDir, { recursive: true });
 
   const currentBranch = git(root, ['branch', '--show-current']).stdout.trim() || 'main';
@@ -663,6 +740,7 @@ function runInit(args) {
 
   writeJson(manifestPath, manifest);
   writeJson(contextPath, contextPack);
+  if (!existsSync(policyPath) || args.force) writeJson(policyPath, defaultPolicy());
   const approvalPath = join(runDir, 'approvals.jsonl');
   if (!existsSync(approvalPath) || args.force) writeFileSync(approvalPath, '');
   appendJsonl(join(runDir, 'events.jsonl'), { type: 'run_initialized', runId, workflowType, baseBranch, workingBranch });
@@ -685,6 +763,7 @@ function artifactChecklist(runDir) {
   const names = [
     'manifest.json',
     'context-pack.json',
+    '../../policy.json',
     'approvals.jsonl',
     'changed-files.json',
     'diff.patch',

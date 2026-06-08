@@ -73,7 +73,7 @@ The target repo must already contain:
 .agentic-sdlc/runs/<run-id>/approvals.jsonl
 ```
 
-Use `agent-sdlc run init` to scaffold `manifest.json`, `context-pack.json`, and `events.jsonl` for a new run. It detects basic validation commands from common repo files (`pom.xml`, Gradle files, `package.json`, `go.mod`).
+Use `agent-sdlc run init` to scaffold `manifest.json`, `context-pack.json`, `approvals.jsonl`, `events.jsonl`, and repo policy config at `.agentic-sdlc/policy.json`. It detects basic validation commands from common repo files (`pom.xml`, Gradle files, `package.json`, `go.mod`).
 
 `approvals.jsonl` must contain an approved implementation plan gate:
 
@@ -95,6 +95,15 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 ```
 
 The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, applies a deterministic config change, captures diff and changed files, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
+
+For `.yaml`/`.yml` target files, dotted keys are written as nested YAML. For example `--set-key feature.enabled --set-value true` writes:
+
+```yaml
+feature:
+  enabled: true
+```
+
+Policy config is loaded from `.agentic-sdlc/policy.json` when present. It controls protected branches and validation gating defaults.
 
 The `feature pr-preview` command reads the execution artifacts and generates PR preview artifacts only. It does not push branches, create PRs, or write to enterprise systems.
 

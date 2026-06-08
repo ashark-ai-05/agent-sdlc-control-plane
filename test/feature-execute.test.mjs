@@ -45,7 +45,7 @@ test('feature execute applies controlled config change and persists artifacts', 
   assert.equal(payload.confidence.rating, 'high');
 
   const runDir = join(repo, '.agentic-sdlc/runs/run-1');
-  assert.match(readFileSync(join(repo, 'src/main/resources/application.yml'), 'utf8'), /feature\.enabled: true/);
+  assert.match(readFileSync(join(repo, 'src/main/resources/application.yml'), 'utf8'), /feature:\n  enabled: true/);
   assert.match(readFileSync(join(runDir, 'diff.patch'), 'utf8'), /agent-sdlc mock config change/);
   assert.ok(existsSync(join(runDir, 'changed-files.json')));
   assert.ok(existsSync(join(runDir, 'maven-output.txt')));
@@ -242,6 +242,8 @@ test('run init scaffolds manifest and context pack with validation detection', (
   assert.equal(manifest.runId, 'new-run');
   assert.deepEqual(manifest.validationCommands, ['npm test']);
   assert.equal(context.contextSufficiencyScore, 0.5);
+  const policy = JSON.parse(readFileSync(join(repo, '.agentic-sdlc/policy.json'), 'utf8'));
+  assert.deepEqual(policy.protectedBranches, ['main', 'master']);
   assert.ok(existsSync(join(runDir, 'approvals.jsonl')));
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /run_initialized/);
 });
