@@ -5,6 +5,10 @@ Local-first Agentic SDLC workflow control CLI.
 Implemented MVP commands:
 
 ```bash
+agent-sdlc daemon start \
+  --repo /path/to/repo \
+  --port 4317
+
 agent-sdlc repo scan \
   --repo /path/to/repo
 
@@ -128,6 +132,20 @@ The `repo scan` command writes `.agentic-sdlc/repo-scan.json` with current branc
 The `policy validate` command writes `.agentic-sdlc/policy-validation.json` with the effective policy, hard errors, and warnings for weakened safety settings.
 
 The `config validate` command writes `.agentic-sdlc/config-validation.json` for one target file or all detected config files. It validates JSON parsing and basic YAML/properties/TOML shape without external dependencies.
+
+The `daemon start` command runs a localhost mission-control server. Open the printed URL to view runs, current state, validation/confidence, available artifacts, and approval controls. API endpoints include:
+
+```text
+GET  /
+GET  /api/health
+GET  /api/repo/scan
+GET  /api/runs
+GET  /api/runs/<run-id>/status
+GET  /api/runs/<run-id>/artifacts/<artifact-name>
+POST /api/runs/<run-id>/approvals
+```
+
+The daemon is local-only by default (`127.0.0.1`) and writes the same approval JSONL records as the CLI.
 
 The `feature pr-preview` command reads the execution artifacts and generates PR preview artifacts only. It does not push branches, create PRs, or write to enterprise systems.
 

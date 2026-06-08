@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 
 const cli = new URL('../bin/agent-sdlc.mjs', import.meta.url).pathname;
 
@@ -294,4 +294,60 @@ test('repo scan, policy validate, and config validate persist safety artifacts',
   assert.equal(configPayload.filesChecked, 1);
   assert.equal(configPayload.results[0].type, 'yaml');
   assert.ok(existsSync(join(repo, '.agentic-sdlc/config-validation.json')));
+});
+
+function waitForDaemon(child) {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => reject(new Error(`daemon did not start\nstdout=${stdout}\nstderr=${stderr}`)), 5000);
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+      try {
+        const payload = JSON.parse(stdout);
+        clearTimeout(timer);
+        resolve(payload.url);
+      } catch {}
+    });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('exit', (code) => reject(new Error(`daemon exited early ${code}\nstdout=${stdout}\nstderr=${stderr}`)));
+  });
+}
+
+test('daemon serves mission-control UI, status API, artifacts, and approval updates', async () => {
+  const repo = makeRepo();
+  executeAndPreview(repo);
+  const child = spawn('node', [cli, 'daemon', 'start', '--repo', repo, '--port', '0'], { encoding: 'utf8' });
+  try {
+    const baseUrl = await waitForDaemon(child);
+    const html = await fetch(baseUrl).then((res) => res.text());
+    assert.match(html, /Agent SDLC Mission Control/);
+
+    const health = await fetch(`${baseUrl}/api/health`).then((res) => res.json());
+    assert.equal(health.ok, true);
+    assert.ok(health.runs.includes('run-1'));
+
+    const runs = await fetch(`${baseUrl}/api/runs`).then((res) => res.json());
+    assert.equal(runs.runs[0].runId, 'run-1');
+    assert.equal(runs.runs[0].state, 'waiting_pr_approval');
+
+    const status = await fetch(`${baseUrl}/api/runs/run-1/status`).then((res) => res.json());
+    assert.equal(status.validation.ok, true);
+    assert.ok(status.artifacts.some((artifact) => artifact.name === 'diff.patch' && artifact.present));
+
+    const diff = await fetch(`${baseUrl}/api/runs/run-1/artifacts/diff.patch`).then((res) => res.text());
+    assert.match(diff, /feature:/);
+
+    const approval = await fetch(`${baseUrl}/api/runs/run-1/approvals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gate: 'pr_creation', status: 'approved', actor: 'tester' }),
+    }).then((res) => res.json());
+    assert.equal(approval.status, 'approved');
+
+    const updated = await fetch(`${baseUrl}/api/runs/run-1/status`).then((res) => res.json());
+    assert.ok(updated.gates.approved.includes('pr_creation'));
+  } finally {
+    child.kill('SIGTERM');
+  }
 });

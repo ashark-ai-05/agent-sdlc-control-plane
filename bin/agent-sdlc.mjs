@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { dirname, join, resolve, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { URL } from 'node:url';
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -804,12 +805,15 @@ function validatePolicyShape(policy) {
   return { ok: errors.length === 0, errors, warnings };
 }
 
-function repoScan(args) {
-  const repo = resolve(String(args.repo || ''));
-  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
-  const gitRoot = git(repo, ['rev-parse', '--show-toplevel']);
-  if (!gitRoot.ok) die(`${repo} is not a git repository`);
-  const root = gitRoot.stdout.trim();
+function resolveGitRoot(repo) {
+  const resolved = resolve(String(repo || ''));
+  if (!resolved || !existsSync(resolved)) die('--repo must point to an existing repository');
+  const gitRoot = git(resolved, ['rev-parse', '--show-toplevel']);
+  if (!gitRoot.ok) die(`${resolved} is not a git repository`);
+  return gitRoot.stdout.trim();
+}
+
+function buildRepoScan(root) {
   const trackedFiles = listTrackedFiles(root);
   const allFiles = trackedFiles.length ? trackedFiles : walkFiles(root);
   const configFiles = allFiles.filter(isConfigPath).sort();
@@ -817,7 +821,7 @@ function repoScan(args) {
   const remotes = git(root, ['remote', '-v']).stdout.split('\n').filter(Boolean);
   const branches = git(root, ['branch', '--format=%(refname:short)']).stdout.split('\n').filter(Boolean);
   const currentBranch = git(root, ['branch', '--show-current']).stdout.trim();
-  const scan = {
+  return {
     scannedAt: new Date().toISOString(),
     repo: root,
     currentBranch,
@@ -838,6 +842,11 @@ function repoScan(args) {
     dirtyFiles,
     policyPresent: existsSync(join(root, '.agentic-sdlc', 'policy.json')),
   };
+}
+
+function repoScan(args) {
+  const root = resolveGitRoot(args.repo);
+  const scan = buildRepoScan(root);
   const outPath = join(root, '.agentic-sdlc', 'repo-scan.json');
   writeJson(outPath, scan);
   console.log(JSON.stringify({ ...scan, artifact: outPath }, null, 2));
@@ -1022,14 +1031,8 @@ function nextCommandForState(state, repo, runId) {
   return byState[state] || 'Continue planning/approval flow.';
 }
 
-function runStatus(args) {
-  const repo = resolve(String(args.repo || ''));
-  const runId = String(args.run || '');
-  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
-  if (!runId) die('--run is required');
-
+function buildRunStatusPayload(repo, runId) {
   const { root, runDir, approvalPath, manifest, contextPack } = loadRun(repo, runId);
-  const approvalRecords = approvals(approvalPath);
   const approvalsPresent = approvedGates(approvalPath);
   const allGates = ['implementation_plan', 'execution', 'pr_creation', 'enterprise_update'];
   const missingGates = allGates.filter((gate) => !approvalsPresent.includes(gate));
@@ -1039,8 +1042,7 @@ function runStatus(args) {
   const changedFiles = fileListFromChangedFiles(readJson(join(runDir, 'changed-files.json'), {}));
   const state = inferState({ artifacts, approvalsPresent, validationSummary });
   const nextRecommendedCommand = nextCommandForState(state, root, runId);
-
-  const payload = {
+  return {
     runId,
     repo: root,
     state,
@@ -1057,6 +1059,16 @@ function runStatus(args) {
     changedFiles,
     nextRecommendedCommand,
   };
+}
+
+function runStatus(args) {
+  const repo = resolve(String(args.repo || ''));
+  const runId = String(args.run || '');
+  if (!repo || !existsSync(repo)) die('--repo must point to an existing repository');
+  if (!runId) die('--run is required');
+
+  const payload = buildRunStatusPayload(repo, runId);
+  const { artifacts, changedFiles, gates, repo: root, state, nextRecommendedCommand } = payload;
 
   if (args.json) {
     console.log(JSON.stringify(payload, null, 2));
@@ -1070,8 +1082,8 @@ function runStatus(args) {
   console.log(`State: ${state}`);
   console.log(`Workflow: ${payload.workflowType || 'unknown'}`);
   console.log(`Working branch: ${payload.workingBranch || 'unknown'}`);
-  console.log(`Approved gates: ${approvalsPresent.length ? approvalsPresent.join(', ') : 'none'}`);
-  console.log(`Missing gates: ${missingGates.length ? missingGates.join(', ') : 'none'}`);
+  console.log(`Approved gates: ${gates.approved.length ? gates.approved.join(', ') : 'none'}`);
+  console.log(`Missing gates: ${gates.missing.length ? gates.missing.join(', ') : 'none'}`);
   console.log(`Validation: ${payload.validation.ok === null ? 'not run' : payload.validation.ok ? 'passed' : 'failed'}`);
   console.log(`Confidence: ${payload.confidence.overallConfidence ?? 'not scored'} (${payload.confidence.rating || 'not_scored'})`);
   console.log(`Changed files: ${changedFiles.length ? changedFiles.join(', ') : 'none'}`);
@@ -1167,13 +1179,213 @@ function approvalCommand(args, action) {
   die(`unknown approval action: ${action}`);
 }
 
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function sendText(res, status, text, contentType = 'text/plain; charset=utf-8') {
+  res.writeHead(status, { 'Content-Type': contentType });
+  res.end(text);
+}
+
+function readRequestJson(req) {
+  return new Promise((resolveBody, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 1024) reject(new Error('request body too large'));
+    });
+    req.on('end', () => {
+      if (!body.trim()) resolveBody({});
+      else {
+        try { resolveBody(JSON.parse(body)); } catch (error) { reject(error); }
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function listRunIds(root) {
+  const runsRoot = join(root, '.agentic-sdlc', 'runs');
+  if (!existsSync(runsRoot)) return [];
+  return readdirSync(runsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function missionControlHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent SDLC Mission Control</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #09090b; color: #f4f4f5; }
+    body { margin: 0; padding: 28px; background: radial-gradient(circle at top left, #172554 0, transparent 32rem), #09090b; }
+    main { max-width: 1180px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 32px; }
+    .muted { color: #a1a1aa; }
+    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 18px; margin-top: 22px; }
+    .card { background: rgba(24,24,27,.86); border: 1px solid #3f3f46; border-radius: 16px; padding: 18px; box-shadow: 0 18px 60px rgba(0,0,0,.35); }
+    button { background: #2563eb; color: white; border: 0; border-radius: 10px; padding: 9px 12px; font-weight: 700; cursor: pointer; margin: 4px 4px 4px 0; }
+    button.secondary { background: #3f3f46; }
+    button.danger { background: #be123c; }
+    .run { padding: 10px; border-radius: 10px; border: 1px solid #3f3f46; margin: 8px 0; cursor: pointer; }
+    .run:hover, .run.active { border-color: #60a5fa; background: rgba(37,99,235,.18); }
+    .pill { display: inline-block; border-radius: 999px; padding: 3px 9px; font-size: 12px; background: #27272a; color: #e4e4e7; margin: 2px; }
+    .ok { background: #14532d; } .warn { background: #713f12; } .bad { background: #7f1d1d; }
+    pre { white-space: pre-wrap; overflow: auto; max-height: 520px; background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 14px; }
+    a { color: #93c5fd; }
+    input, select { background: #09090b; color: #f4f4f5; border: 1px solid #3f3f46; border-radius: 8px; padding: 8px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Agent SDLC Mission Control</h1>
+  <div class="muted" id="repo">Loading repo...</div>
+  <div class="grid">
+    <section class="card">
+      <div class="row"><button onclick="refresh()">Refresh</button><button class="secondary" onclick="scanRepo()">Repo scan</button></div>
+      <h2>Runs</h2>
+      <div id="runs"></div>
+    </section>
+    <section class="card">
+      <h2 id="title">Select a run</h2>
+      <div id="summary"></div>
+      <h3>Approvals</h3>
+      <div class="row">
+        <select id="gate"><option>implementation_plan</option><option>execution</option><option>pr_creation</option><option>enterprise_update</option></select>
+        <input id="actor" placeholder="actor" value="mission-control">
+        <button onclick="approveGate()">Approve</button>
+        <button class="danger" onclick="rejectGate()">Reject</button>
+      </div>
+      <h3>Artifacts</h3>
+      <div id="artifacts"></div>
+      <h3>Raw status</h3>
+      <pre id="raw">{}</pre>
+    </section>
+  </div>
+</main>
+<script>
+let selectedRun = null;
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch { data = text; }
+  if (!res.ok) throw new Error(typeof data === 'string' ? data : (data.error || text));
+  return data;
+}
+async function refresh() {
+  const health = await api('/api/health');
+  document.getElementById('repo').textContent = health.repo + ' • ' + health.currentBranch;
+  const runs = await api('/api/runs');
+  document.getElementById('runs').innerHTML = runs.runs.map(r => '<div class="run '+(r.runId===selectedRun?'active':'')+'" onclick="selectRun(\''+r.runId+'\')"><b>'+r.runId+'</b><br><span class="muted">'+r.state+'</span></div>').join('') || '<div class="muted">No runs yet</div>';
+  if (selectedRun) await selectRun(selectedRun, false);
+}
+async function selectRun(runId, rerenderList=true) {
+  selectedRun = runId;
+  const status = await api('/api/runs/' + encodeURIComponent(runId) + '/status');
+  document.getElementById('title').textContent = runId + ' • ' + status.state;
+  const validationClass = status.validation.ok === true ? 'ok' : status.validation.ok === false ? 'bad' : 'warn';
+  document.getElementById('summary').innerHTML = '<span class="pill '+validationClass+'">validation: '+status.validation.ok+'</span><span class="pill">confidence: '+(status.confidence.overallConfidence ?? 'n/a')+' '+(status.confidence.rating || '')+'</span><p class="muted">Next: '+status.nextRecommendedCommand+'</p>';
+  document.getElementById('artifacts').innerHTML = status.artifacts.filter(a => a.present).map(a => '<a class="pill" target="_blank" href="/api/runs/'+encodeURIComponent(runId)+'/artifacts/'+encodeURIComponent(a.name)+'">'+a.name+'</a>').join('');
+  document.getElementById('raw').textContent = JSON.stringify(status, null, 2);
+  if (rerenderList) await refresh();
+}
+async function approveGate() {
+  if (!selectedRun) return alert('select a run first');
+  await api('/api/runs/' + encodeURIComponent(selectedRun) + '/approvals', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ gate: gate.value, status: 'approved', actor: actor.value }) });
+  await selectRun(selectedRun);
+}
+async function rejectGate() {
+  if (!selectedRun) return alert('select a run first');
+  const reason = prompt('Rejection reason', 'needs changes') || 'needs changes';
+  await api('/api/runs/' + encodeURIComponent(selectedRun) + '/approvals', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ gate: gate.value, status: 'rejected', actor: actor.value, reason }) });
+  await selectRun(selectedRun);
+}
+async function scanRepo() { document.getElementById('raw').textContent = JSON.stringify(await api('/api/repo/scan'), null, 2); }
+refresh().catch(e => { document.getElementById('raw').textContent = e.stack || String(e); });
+</script>
+</body>
+</html>`;
+}
+
+async function handleDaemonRequest(req, res, root) {
+  const url = new URL(req.url, 'http://localhost');
+  const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  try {
+    if (req.method === 'GET' && url.pathname === '/') return sendText(res, 200, missionControlHtml(), 'text/html; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/api/health') {
+      return sendJson(res, 200, { ok: true, repo: root, currentBranch: git(root, ['branch', '--show-current']).stdout.trim(), runs: listRunIds(root) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/repo/scan') {
+      const scan = buildRepoScan(root);
+      const artifact = join(root, '.agentic-sdlc', 'repo-scan.json');
+      writeJson(artifact, scan);
+      return sendJson(res, 200, { ...scan, artifact });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/runs') {
+      const runs = listRunIds(root).map((runId) => {
+        try { return buildRunStatusPayload(root, runId); } catch { return { runId, state: 'unreadable' }; }
+      });
+      return sendJson(res, 200, { repo: root, runs });
+    }
+    if (segments[0] === 'api' && segments[1] === 'runs' && segments[2]) {
+      const runId = segments[2];
+      const { runDir, approvalPath, eventsPath } = loadRun(root, runId);
+      if (req.method === 'GET' && segments[3] === 'status') return sendJson(res, 200, buildRunStatusPayload(root, runId));
+      if (req.method === 'GET' && segments[3] === 'artifacts' && segments[4]) {
+        const artifactName = segments.slice(4).join('/');
+        const artifactPath = resolve(runDir, artifactName);
+        const rel = relative(runDir, artifactPath);
+        if (rel.startsWith('..') || !existsSync(artifactPath)) return sendJson(res, 404, { error: 'artifact not found' });
+        const contentType = artifactName.endsWith('.json') || artifactName.endsWith('.jsonl') ? 'application/json; charset=utf-8' : artifactName.endsWith('.md') ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8';
+        return sendText(res, 200, readFileSync(artifactPath, 'utf8'), contentType);
+      }
+      if (req.method === 'POST' && segments[3] === 'approvals') {
+        const body = await readRequestJson(req);
+        const gate = String(body.gate || '');
+        const status = String(body.status || '');
+        const actor = String(body.actor || 'mission-control');
+        const reason = body.reason ? String(body.reason) : undefined;
+        const validGates = ['context_pack', 'requirement', 'implementation_plan', 'execution', 'pr_creation', 'enterprise_update'];
+        if (!validGates.includes(gate)) return sendJson(res, 400, { error: `invalid gate: ${gate}` });
+        if (!['approved', 'rejected'].includes(status)) return sendJson(res, 400, { error: 'status must be approved or rejected' });
+        appendJsonl(approvalPath, { gate, status, actor, reason });
+        appendJsonl(eventsPath, { type: 'approval_recorded', gate, status, actor, reason, source: 'mission-control' });
+        return sendJson(res, 200, { runId, gate, status, actor, approvalPath, state: buildRunStatusPayload(root, runId).state });
+      }
+    }
+    return sendJson(res, 404, { error: 'not found' });
+  } catch (error) {
+    return sendJson(res, 500, { error: error.message, stack: process.env.AGENT_SDLC_DEBUG ? error.stack : undefined });
+  }
+}
+
+function daemonStart(args) {
+  const root = resolveGitRoot(args.repo || '.');
+  const port = Number(args.port || 4317);
+  const host = String(args.host || '127.0.0.1');
+  const server = createServer((req, res) => {
+    handleDaemonRequest(req, res, root);
+  });
+  server.listen(port, host, () => {
+    console.log(JSON.stringify({ state: 'daemon_started', repo: root, url: `http://${host}:${server.address().port}`, endpoints: ['/api/health', '/api/repo/scan', '/api/runs'] }, null, 2));
+  });
+}
+
 function usage() {
-  console.log(`Usage:\n  agent-sdlc repo scan --repo <repo>\n  agent-sdlc policy validate --repo <repo>\n  agent-sdlc config validate --repo <repo> [--target-file <path>]\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
+  console.log(`Usage:\n  agent-sdlc daemon start --repo <repo> [--host 127.0.0.1] [--port 4317]\n  agent-sdlc repo scan --repo <repo>\n  agent-sdlc policy validate --repo <repo>\n  agent-sdlc config validate --repo <repo> [--target-file <path>]\n  agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]\n  agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> [--mock-agent] [--auto-approve]\n  agent-sdlc feature pr-preview --repo <repo> --run <run-id>\n  agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash [--dry-run] [--allow-failed-validation]\n  agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> [--jira-key ABC-123] [--confluence-page-id 12345]\n  agent-sdlc feature apply-enterprise-updates --repo <repo> --run <run-id> [--dry-run]\n  agent-sdlc run status --repo <repo> --run <run-id> [--json]\n  agent-sdlc run audit-report --repo <repo> --run <run-id>\n  agent-sdlc approval list --repo <repo> --run <run-id> [--json]\n  agent-sdlc approval approve --repo <repo> --run <run-id> --gate <gate> [--actor <name>] [--reason <reason>]\n  agent-sdlc approval reject --repo <repo> --run <run-id> --gate <gate> --reason <reason> [--actor <name>]\n`);
 }
 
 const args = parseArgs(process.argv.slice(2));
 const [domain, action] = args._;
-if (domain === 'repo' && action === 'scan') repoScan(args);
+if (domain === 'daemon' && action === 'start') daemonStart(args);
+else if (domain === 'repo' && action === 'scan') repoScan(args);
 else if (domain === 'policy' && action === 'validate') policyValidate(args);
 else if (domain === 'config' && action === 'validate') configValidate(args);
 else if (domain === 'run' && action === 'init') runInit(args);
