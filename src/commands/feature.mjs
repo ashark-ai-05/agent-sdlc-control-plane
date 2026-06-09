@@ -31,6 +31,22 @@ export function featureInterpret(args) {
   const markdown = `# Interpreted requirement\n\n## Intent\n\n${interpretedRequirement.intent}\n\n## Summary\n\n${interpretedRequirement.summary}\n\n## Constraints\n\n${bulletList(interpretedRequirement.constraints)}\n\n## Assumptions\n\n${bulletList(interpretedRequirement.assumptions)}\n\n## Unknowns\n\n${bulletList(interpretedRequirement.unknowns)}\n\n## Approval\n\nApprove or reject the \`requirement\` gate before planning.\n`;
 
   writeJson(join(runDir, 'agent-adapter-interpret-requirement.json'), adapterArtifact);
+  if (interpretedRequirement.providerResult?.executed) {
+    writeJson(join(runDir, 'agent-adapter-interpret-result.json'), {
+      provider: interpretedRequirement.provider,
+      phase: interpretedRequirement.phase,
+      ok: interpretedRequirement.providerResult.ok,
+      status: interpretedRequirement.providerResult.status,
+      signal: interpretedRequirement.providerResult.signal,
+      error: interpretedRequirement.providerResult.error,
+      startedAt: interpretedRequirement.providerResult.startedAt,
+      completedAt: interpretedRequirement.providerResult.completedAt,
+      parsed: interpretedRequirement.providerResult.parsed,
+      interpretedRequirement: interpretedRequirement.providerResult.interpretedRequirement,
+      readiness: interpretedRequirement.providerResult.readiness,
+    });
+    writeFileSync(join(runDir, 'amp-interpret-raw-output.txt'), interpretedRequirement.providerResult.stdout || '');
+  }
   writeJson(join(runDir, 'interpreted-requirement.json'), {
     runId,
     repository: root,

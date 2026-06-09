@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
@@ -97,6 +97,50 @@ test('provider check writes Amp readiness without exposing credentials', () => {
   const artifact = readFileSync(join(repo, '.agentic-sdlc/provider-readiness/amp.json'), 'utf8');
   assert.match(artifact, /live Amp invocation is not requested/);
   assert.doesNotMatch(artifact, /secret-test-value/);
+});
+
+test('amp live interpret invokes configured command only after explicit opt-in and persists raw output', () => {
+  const repo = makeRepo();
+  const fakeAmp = join(repo, 'fake-amp.mjs');
+  writeFileSync(fakeAmp, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({
+    intent: 'Live interpreted feature flag requirement',
+    summary: 'Live Amp summary',
+    workflowType: 'feature_config_change',
+    constraints: ['read-only live interpretation'],
+    assumptions: ['fake amp command used in test'],
+    unknowns: ['real provider output not used']
+  }));
+});
+`);
+  chmodSync(fakeAmp, 0o755);
+
+  const result = spawnSync('node', [cli, 'feature', 'interpret', '--repo', repo, '--run', 'run-1', '--requirement', 'Enable feature flag for service-a', '--agent-adapter', 'amp'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      AGENT_SDLC_AMP_LIVE: 'true',
+      AGENT_SDLC_AMP_ALLOW_NETWORK: 'true',
+      AGENT_SDLC_AMP_COMMAND: fakeAmp,
+      AMP_API_KEY: 'secret-test-value',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, /secret-test-value/);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.adapter.provider, 'amp');
+  assert.equal(payload.interpretedRequirement.intent, 'Live interpreted feature flag requirement');
+  assert.equal(payload.interpretedRequirement.providerRequest.externalCallExecuted, true);
+  assert.equal(payload.interpretedRequirement.providerRequest.liveInvocationSucceeded, true);
+  assert.equal(payload.interpretedRequirement.audit.providerInvocationExecuted, true);
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'amp-interpret-raw-output.txt'), 'utf8'), /Live Amp summary/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-interpret-result.json'), 'utf8'), /Live interpreted feature flag requirement/);
+  assert.doesNotMatch(readFileSync(join(runDir, 'interpreted-requirement.json'), 'utf8'), /secret-test-value/);
 });
 
 test('amp adapter skeleton records provider requests across planning and execution phases', () => {

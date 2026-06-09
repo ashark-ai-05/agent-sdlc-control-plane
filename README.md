@@ -174,6 +174,8 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/policy-validation.json
 .agentic-sdlc/config-validation.json
 .agentic-sdlc/runs/<run-id>/agent-adapter-interpret-requirement.json
+.agentic-sdlc/runs/<run-id>/agent-adapter-interpret-result.json        # only when live Amp interpret runs
+.agentic-sdlc/runs/<run-id>/amp-interpret-raw-output.txt               # only when live Amp interpret runs
 .agentic-sdlc/runs/<run-id>/interpreted-requirement.json
 .agentic-sdlc/runs/<run-id>/interpreted-requirement.md
 .agentic-sdlc/runs/<run-id>/agent-adapter-plan.json
@@ -194,7 +196,7 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/events.jsonl
 ```
 
-The `feature interpret` command runs the adapter `interpret_requirement` phase and writes `interpreted-requirement.json`, `interpreted-requirement.md`, and `agent-adapter-interpret-requirement.json`. The mock adapter is deterministic/local-only and stops at `waiting_requirement_approval` so a human can approve or correct the interpretation before planning/execution. The `amp` adapter is also available; in the current skeleton it records provider request artifacts for Amp but does not call the Amp SDK/CLI.
+The `feature interpret` command runs the adapter `interpret_requirement` phase and writes `interpreted-requirement.json`, `interpreted-requirement.md`, and `agent-adapter-interpret-requirement.json`. The mock adapter is deterministic/local-only and stops at `waiting_requirement_approval` so a human can approve or correct the interpretation before planning/execution. The `amp` adapter is also available; by default it records provider request artifacts without calling Amp. If `AGENT_SDLC_AMP_LIVE=true`, `AGENT_SDLC_AMP_ALLOW_NETWORK=true`, and readiness passes, only the `interpret_requirement` phase invokes the configured Amp command. That live path is read-only/no-write and persists `agent-adapter-interpret-result.json` plus `amp-interpret-raw-output.txt` for audit.
 
 The `feature plan` command runs `create_task_breakdown` and `create_implementation_plan`, writes task breakdown and implementation plan artifacts, and stops at `waiting_plan_approval` for human approval. With `--agent-adapter amp`, these artifacts include request-artifact-only Amp prompts/schemas for future live provider invocation.
 

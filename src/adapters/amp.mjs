@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path';
-import { checkAmpReadiness } from '../core/amp-runtime.mjs';
+import { checkAmpReadiness, invokeAmpInterpretRequirement } from '../core/amp-runtime.mjs';
 import { applyConfigChange, validateConfigFile } from '../core/config.mjs';
 import { adapterContract } from './types.mjs';
 
@@ -24,10 +24,10 @@ function providerRequest({ phase, runId, prompt, schema, manifest = {}, contextP
   };
 }
 
-function audit({ localWrite = false } = {}) {
+function audit({ localWrite = false, providerInvocationExecuted = false } = {}) {
   return {
-    deterministic: true,
-    providerInvocationExecuted: false,
+    deterministic: !providerInvocationExecuted,
+    providerInvocationExecuted,
     controlledLocalWrite: localWrite,
     arbitraryCodeExecution: false,
     externalWrites: false,
@@ -41,32 +41,45 @@ export function createAmpAdapter() {
     interpretRequirement({ requirement, runId, manifest = {}, contextPack = {} }) {
       const intent = String(requirement || '').trim();
       if (!intent) throw new Error('--requirement is required');
+      const prompt = `Interpret this enterprise SDLC requirement for a controlled local workflow. Return one JSON object with keys: intent, summary, workflowType, constraints, assumptions, unknowns. Do not request tool use or write files.\n\nRequirement:\n${intent}`;
       const request = providerRequest({
         phase: 'interpret_requirement',
         runId,
-        prompt: `Interpret this enterprise SDLC requirement for a controlled local workflow:\n\n${intent}`,
+        prompt,
         schema: 'interpreted-requirement-v1',
         manifest,
         contextPack,
       });
+      const providerResult = invokeAmpInterpretRequirement({ prompt, requirement: intent, manifest, contextPack });
+      const liveInterpreted = providerResult.ok ? providerResult.interpretedRequirement : null;
+      const providerConstraints = liveInterpreted?.constraints?.length
+        ? liveInterpreted.constraints
+        : [
+          'amp adapter records provider request artifacts',
+          providerResult.executed ? 'live Amp interpret invocation executed but output stays read-only/no-write' : 'no Amp SDK/CLI call is executed unless readiness and opt-in checks pass',
+          'human approval required before planning or execution in normal workflow mode',
+        ];
       return {
         provider: contract.provider,
         contractVersion: contract.contractVersion,
         phase: 'interpret_requirement',
         capabilities: contract.capabilities,
         runId,
-        intent,
-        workflowType: manifest.workflowType || contextPack.workflowType || 'feature_config_change',
-        summary: intent,
-        constraints: [
-          'amp adapter skeleton records provider request artifacts only',
-          'no Amp SDK/CLI call is executed in skeleton mode',
-          'human approval required before planning or execution in normal workflow mode',
-        ],
-        assumptions: Array.isArray(contextPack.assumptions) ? contextPack.assumptions : [],
-        unknowns: Array.isArray(contextPack.unknowns) ? contextPack.unknowns : [],
-        providerRequest: request,
-        audit: audit(),
+        intent: liveInterpreted?.intent || intent,
+        workflowType: liveInterpreted?.workflowType || manifest.workflowType || contextPack.workflowType || 'feature_config_change',
+        summary: liveInterpreted?.summary || intent,
+        constraints: providerConstraints,
+        assumptions: liveInterpreted?.assumptions?.length ? liveInterpreted.assumptions : (Array.isArray(contextPack.assumptions) ? contextPack.assumptions : []),
+        unknowns: liveInterpreted?.unknowns?.length ? liveInterpreted.unknowns : (Array.isArray(contextPack.unknowns) ? contextPack.unknowns : []),
+        providerRequest: {
+          ...request,
+          externalCallExecuted: providerResult.executed,
+          liveInvocationSucceeded: Boolean(providerResult.ok),
+          providerResultArtifact: providerResult.executed ? 'agent-adapter-interpret-result.json' : null,
+          rawOutputArtifact: providerResult.executed ? 'amp-interpret-raw-output.txt' : null,
+        },
+        providerResult,
+        audit: audit({ providerInvocationExecuted: providerResult.executed }),
       };
     },
     createTaskBreakdown({ runId, manifest = {}, contextPack = {}, interpretedRequirement = {} }) {
