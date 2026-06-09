@@ -179,6 +179,22 @@ export function featureReview(args) {
   const markdown = `# Change review\n\n## Recommendation\n\n${review.recommendation}\n\n## Findings\n\n${bulletList(review.findings)}\n\n## Human review focus\n\n${bulletList(review.humanReviewFocus)}\n`;
 
   writeJson(join(runDir, 'change-review.json'), { runId, repository: root, ...review, adapter: adapterArtifact });
+  if (review.providerResult?.executed) {
+    writeJson(join(runDir, 'agent-adapter-review-result.json'), {
+      provider: review.provider,
+      phase: review.phase,
+      ok: review.providerResult.ok,
+      status: review.providerResult.status,
+      signal: review.providerResult.signal,
+      error: review.providerResult.error,
+      startedAt: review.providerResult.startedAt,
+      completedAt: review.providerResult.completedAt,
+      parsed: review.providerResult.parsed,
+      changeReview: review.providerResult.changeReview,
+      readiness: review.providerResult.readiness,
+    });
+    writeFileSync(join(runDir, 'amp-review-raw-output.txt'), review.providerResult.stdout || '');
+  }
   writeFileSync(join(runDir, 'change-review.md'), markdown);
   writeJson(join(runDir, 'agent-adapter-review.json'), adapterArtifact);
   appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: adapterArtifact.phase, capabilities: adapterArtifact.capabilities });
@@ -251,6 +267,23 @@ export function featureExecute(args) {
   const relativeTarget = adapterResult.targetFile;
   const configValidation = adapterResult.configValidation;
   writeJson(join(runDir, 'agent-adapter.json'), adapterResult);
+  if (adapterResult.providerResult?.executed) {
+    writeJson(join(runDir, 'agent-adapter-execution-proposal-result.json'), {
+      provider: adapterResult.provider,
+      phase: adapterResult.phase,
+      ok: adapterResult.providerResult.ok,
+      status: adapterResult.providerResult.status,
+      signal: adapterResult.providerResult.signal,
+      error: adapterResult.providerResult.error,
+      startedAt: adapterResult.providerResult.startedAt,
+      completedAt: adapterResult.providerResult.completedAt,
+      parsed: adapterResult.providerResult.parsed,
+      executionProposal: adapterResult.providerResult.executionProposal,
+      readiness: adapterResult.providerResult.readiness,
+      appliedByControlPlane: true,
+    });
+    writeFileSync(join(runDir, 'amp-execution-proposal-raw-output.txt'), adapterResult.providerResult.stdout || '');
+  }
   writeJson(join(runDir, 'config-validation.json'), configValidation);
   appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterResult.provider, phase: adapterResult.phase, capabilities: adapterResult.capabilities });
   appendJsonl(eventsPath, { type: 'mock_config_change_applied', file: relativeTarget, key: setKey, value: setValue });
@@ -519,9 +552,11 @@ export function featureEnterprisePreview(args) {
     audit: updatePreview.audit,
   };
 
-  const jiraPreview = `# Jira update preview\n\nIssue: ${jiraKey}\n\n## Proposed comment\n\nAgent SDLC run \`${runId}\` prepared a PR creation request.\n\n- PR title: ${prTitle}\n- Source branch: \`${sourceBranch}\`\n- Target branch: \`${targetBranch}\`\n- PR URL: ${prUrlPlaceholder}\n- Validation: ${validationText}\n- Confidence: ${confidenceText}\n\nChanged files:\n${bulletList(changedFiles)}\n\nHuman approval required before this Jira comment is written: \`enterprise_update\`.\n`;
+  let jiraPreview = `# Jira update preview\n\nIssue: ${jiraKey}\n\n## Proposed comment\n\nAgent SDLC run \`${runId}\` prepared a PR creation request.\n\n- PR title: ${prTitle}\n- Source branch: \`${sourceBranch}\`\n- Target branch: \`${targetBranch}\`\n- PR URL: ${prUrlPlaceholder}\n- Validation: ${validationText}\n- Confidence: ${confidenceText}\n\nChanged files:\n${bulletList(changedFiles)}\n\nHuman approval required before this Jira comment is written: \`enterprise_update\`.\n`;
 
-  const confluencePreview = `# Confluence update preview\n\nPage: ${confluencePageId}\n\n## Proposed section\n\n### Agent SDLC run ${runId}\n\n**Summary:** ${prTitle}\n\n**Branch:** \`${sourceBranch}\` → \`${targetBranch}\`\n\n**Validation:** ${validationText}\n\n**Confidence:** ${confidenceText}\n\n**Changed files:**\n${bulletList(changedFiles)}\n\n**Review focus:**\n${bulletList(confidence.recommendedHumanReviewFocus)}\n\nHuman approval required before this Confluence update is written: \`enterprise_update\`.\n`;
+  let confluencePreview = `# Confluence update preview\n\nPage: ${confluencePageId}\n\n## Proposed section\n\n### Agent SDLC run ${runId}\n\n**Summary:** ${prTitle}\n\n**Branch:** \`${sourceBranch}\` → \`${targetBranch}\`\n\n**Validation:** ${validationText}\n\n**Confidence:** ${confidenceText}\n\n**Changed files:**\n${bulletList(changedFiles)}\n\n**Review focus:**\n${bulletList(confidence.recommendedHumanReviewFocus)}\n\nHuman approval required before this Confluence update is written: \`enterprise_update\`.\n`;
+  if (updatePreview.jiraBody) jiraPreview = updatePreview.jiraBody;
+  if (updatePreview.confluenceBody) confluencePreview = updatePreview.confluenceBody;
 
   const enterpriseRequest = {
     runId,
@@ -563,6 +598,22 @@ export function featureEnterprisePreview(args) {
 
   writeFileSync(join(runDir, 'jira-update-preview.md'), jiraPreview);
   writeFileSync(join(runDir, 'confluence-update-preview.md'), confluencePreview);
+  if (updatePreview.providerResult?.executed) {
+    writeJson(join(runDir, 'agent-adapter-update-previews-result.json'), {
+      provider: updatePreview.provider,
+      phase: updatePreview.phase,
+      ok: updatePreview.providerResult.ok,
+      status: updatePreview.providerResult.status,
+      signal: updatePreview.providerResult.signal,
+      error: updatePreview.providerResult.error,
+      startedAt: updatePreview.providerResult.startedAt,
+      completedAt: updatePreview.providerResult.completedAt,
+      parsed: updatePreview.providerResult.parsed,
+      updatePreviews: updatePreview.providerResult.updatePreviews,
+      readiness: updatePreview.providerResult.readiness,
+    });
+    writeFileSync(join(runDir, 'amp-update-previews-raw-output.txt'), updatePreview.providerResult.stdout || '');
+  }
   writeJson(join(runDir, 'agent-adapter-update-previews.json'), adapterArtifact);
   writeJson(join(runDir, 'enterprise-update-request.json'), enterpriseRequest);
   appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: adapterArtifact.phase, capabilities: adapterArtifact.capabilities });

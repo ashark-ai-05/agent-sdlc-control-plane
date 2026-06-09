@@ -237,6 +237,41 @@ test('amp adapter skeleton records provider requests across planning and executi
   assert.match(readFileSync(join(runDir, 'change-review.json'), 'utf8'), /change-review-v1/);
 });
 
+test('amp live review invokes configured command after local execution and persists review artifacts', () => {
+  const repo = makeRepo();
+  const fakeAmp = join(repo, 'fake-amp-review.mjs');
+  writeFileSync(fakeAmp, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({
+    recommendation: 'approve_with_human_review',
+    findings: ['live review finding'],
+    humanReviewFocus: ['inspect live review focus'],
+    riskAssessment: 'low'
+  }));
+});
+`);
+  chmodSync(fakeAmp, 0o755);
+  const execute = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--agent-adapter', 'amp', '--auto-approve'], { encoding: 'utf8' });
+  assert.equal(execute.status, 0, execute.stderr || execute.stdout);
+
+  const result = spawnSync('node', [cli, 'feature', 'review', '--repo', repo, '--run', 'run-1', '--agent-adapter', 'amp'], {
+    encoding: 'utf8',
+    env: { ...process.env, AGENT_SDLC_AMP_LIVE: 'true', AGENT_SDLC_AMP_ALLOW_NETWORK: 'true', AGENT_SDLC_AMP_COMMAND: fakeAmp, AMP_API_KEY: 'secret-test-value' },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, /secret-test-value/);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.review.providerRequest.externalCallExecuted, true);
+  assert.equal(payload.review.findings[0], 'live review finding');
+  assert.equal(payload.review.audit.providerInvocationExecuted, true);
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'amp-review-raw-output.txt'), 'utf8'), /live review finding/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-review-result.json'), 'utf8'), /inspect live review focus/);
+  assert.doesNotMatch(readFileSync(join(runDir, 'change-review.json'), 'utf8'), /secret-test-value/);
+});
+
 test('feature review creates change review artifacts after execution', () => {
   const repo = makeRepo();
   const execute = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
@@ -253,6 +288,34 @@ test('feature review creates change review artifacts after execution', () => {
   assert.match(readFileSync(join(runDir, 'change-review.md'), 'utf8'), /approve_with_human_review/);
   assert.match(readFileSync(join(runDir, 'change-review.json'), 'utf8'), /review_changes/);
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /changes_reviewed/);
+});
+
+test('amp live execution proposal invokes provider but applies only explicit local config change', () => {
+  const repo = makeRepo();
+  const fakeAmp = join(repo, 'fake-amp-execution.mjs');
+  writeFileSync(fakeAmp, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({ targetFile: 'ignored.yml', setKey: 'ignored.key', setValue: 'false', notes: ['proposal only'] }));
+});
+`);
+  chmodSync(fakeAmp, 0o755);
+  const result = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--agent-adapter', 'amp', '--auto-approve'], {
+    encoding: 'utf8',
+    env: { ...process.env, AGENT_SDLC_AMP_LIVE: 'true', AGENT_SDLC_AMP_ALLOW_NETWORK: 'true', AGENT_SDLC_AMP_COMMAND: fakeAmp, AMP_API_KEY: 'secret-test-value' },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, /secret-test-value/);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.adapter.providerRequest.externalCallExecuted, true);
+  assert.equal(payload.adapter.providerRequest.liveInvocationSucceeded, true);
+  assert.equal(payload.adapter.audit.controlledLocalWrite, true);
+  assert.match(readFileSync(join(repo, 'src/main/resources/application.yml'), 'utf8'), /feature:\n  enabled: true/);
+  assert.doesNotMatch(readFileSync(join(repo, 'src/main/resources/application.yml'), 'utf8'), /ignored/);
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'agent-adapter-execution-proposal-result.json'), 'utf8'), /proposal only/);
+  assert.match(readFileSync(join(runDir, 'amp-execution-proposal-raw-output.txt'), 'utf8'), /ignored.yml/);
 });
 
 test('feature execute applies controlled config change and persists artifacts', () => {
@@ -386,6 +449,34 @@ test('feature enterprise-preview generates Jira and Confluence update previews',
   assert.match(readFileSync(join(runDir, 'agent-adapter-update-previews.json'), 'utf8'), /generate_update_previews/);
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /adapter_phase_completed/);
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /enterprise_update_preview_generated/);
+});
+
+test('amp live update previews drafts Jira and Confluence text without enterprise writes', () => {
+  const repo = makeRepo();
+  executePreviewAndCreatePr(repo);
+  const fakeAmp = join(repo, 'fake-amp-update.mjs');
+  writeFileSync(fakeAmp, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({ summary: 'Live update summary', jiraBody: 'Live Jira draft', confluenceBody: 'Live Confluence draft' }));
+});
+`);
+  chmodSync(fakeAmp, 0o755);
+  const result = spawnSync('node', [cli, 'feature', 'enterprise-preview', '--repo', repo, '--run', 'run-1', '--jira-key', 'ABC-123', '--confluence-page-id', '98765', '--agent-adapter', 'amp'], {
+    encoding: 'utf8',
+    env: { ...process.env, AGENT_SDLC_AMP_LIVE: 'true', AGENT_SDLC_AMP_ALLOW_NETWORK: 'true', AGENT_SDLC_AMP_COMMAND: fakeAmp, AMP_API_KEY: 'secret-test-value' },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, /secret-test-value/);
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'jira-update-preview.md'), 'utf8'), /Live Jira draft/);
+  assert.match(readFileSync(join(runDir, 'confluence-update-preview.md'), 'utf8'), /Live Confluence draft/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-update-previews-result.json'), 'utf8'), /Live update summary/);
+  assert.match(readFileSync(join(runDir, 'amp-update-previews-raw-output.txt'), 'utf8'), /Live Jira draft/);
+  const request = JSON.parse(readFileSync(join(runDir, 'enterprise-update-request.json'), 'utf8'));
+  assert.equal(request.policy.writeJiraNow, false);
+  assert.equal(request.policy.writeConfluenceNow, false);
 });
 
 test('feature apply-enterprise-updates requires enterprise_update approval', () => {

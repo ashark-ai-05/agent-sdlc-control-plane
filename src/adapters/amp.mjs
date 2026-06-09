@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path';
-import { checkAmpReadiness, invokeAmpImplementationPlan, invokeAmpInterpretRequirement, invokeAmpTaskBreakdown } from '../core/amp-runtime.mjs';
+import { checkAmpReadiness, invokeAmpChangeReview, invokeAmpExecutionProposal, invokeAmpImplementationPlan, invokeAmpInterpretRequirement, invokeAmpTaskBreakdown, invokeAmpUpdatePreviews } from '../core/amp-runtime.mjs';
 import { applyConfigChange, validateConfigFile } from '../core/config.mjs';
 import { adapterContract } from './types.mjs';
 
@@ -168,57 +168,93 @@ export function createAmpAdapter() {
       };
     },
     reviewChanges({ runId, manifest = {}, contextPack = {}, changedFiles = [], validationSummary = {}, confidence = {}, diff = '' }) {
+      const prompt = `Review this Agent SDLC change set. Return one JSON object with keys: recommendation, findings, humanReviewFocus, riskAssessment. Do not write files or request tool use.\n\nChanged files:\n${changedFiles.join('\n') || 'none'}\n\nValidation:\n${JSON.stringify(validationSummary)}\n\nConfidence:\n${JSON.stringify(confidence)}\n\nDiff excerpt:\n${diff.slice(0, 12000)}`;
+      const request = providerRequest({
+        phase: 'review_changes',
+        runId,
+        prompt,
+        schema: 'change-review-v1',
+        manifest,
+        contextPack,
+      });
+      const providerResult = invokeAmpChangeReview({ prompt, manifest, contextPack });
+      const liveReview = providerResult.ok ? providerResult.changeReview : null;
       return {
         provider: contract.provider,
         contractVersion: contract.contractVersion,
         phase: 'review_changes',
         capabilities: contract.capabilities,
         runId,
-        recommendation: validationSummary.ok === false ? 'request_changes' : 'approve_with_human_review',
+        recommendation: liveReview?.recommendation || (validationSummary.ok === false ? 'request_changes' : 'approve_with_human_review'),
         changedFiles,
         validationOk: validationSummary.ok ?? null,
         confidenceRating: confidence.rating || 'not_scored',
-        findings: [
+        findings: liveReview?.findings?.length ? liveReview.findings : [
           'Amp review request recorded but not sent in skeleton mode',
           changedFiles.length === 1 ? 'single-file change detected' : `${changedFiles.length} changed files detected`,
           diff ? 'diff artifact available for future Amp/human review' : 'diff artifact missing or empty',
         ],
-        humanReviewFocus: confidence.recommendedHumanReviewFocus || ['inspect diff.patch before PR approval'],
-        providerRequest: providerRequest({
-          phase: 'review_changes',
-          runId,
-          prompt: `Review this change set and validation evidence without creating external writes. Changed files: ${changedFiles.join(', ') || 'none'}`,
-          schema: 'change-review-v1',
-          manifest,
-          contextPack,
-        }),
-        audit: audit(),
+        humanReviewFocus: liveReview?.humanReviewFocus?.length ? liveReview.humanReviewFocus : (confidence.recommendedHumanReviewFocus || ['inspect diff.patch before PR approval']),
+        riskAssessment: liveReview?.riskAssessment || 'not_provided',
+        providerRequest: {
+          ...request,
+          externalCallExecuted: providerResult.executed,
+          liveInvocationSucceeded: Boolean(providerResult.ok),
+          providerResultArtifact: providerResult.executed ? 'agent-adapter-review-result.json' : null,
+          rawOutputArtifact: providerResult.executed ? 'amp-review-raw-output.txt' : null,
+        },
+        providerResult,
+        audit: audit({ providerInvocationExecuted: providerResult.executed }),
       };
     },
-    generateUpdatePreviews({ runId, prTitle = '', changedFiles = [] }) {
+    generateUpdatePreviews({ runId, manifest = {}, contextPack = {}, prTitle = '', changedFiles = [] }) {
+      const prompt = `Draft enterprise update previews for this Agent SDLC run. Return one JSON object with summary, jiraBody, and confluenceBody. Do not write Jira or Confluence.\n\nRun: ${runId}\nPR title: ${prTitle}\nChanged files:\n${changedFiles.join('\n') || 'none'}`;
+      const request = providerRequest({
+        phase: 'generate_update_previews',
+        runId,
+        prompt,
+        schema: 'enterprise-update-preview-v1',
+        manifest,
+        contextPack,
+      });
+      const providerResult = invokeAmpUpdatePreviews({ prompt, manifest, contextPack });
+      const liveUpdatePreviews = providerResult.ok ? providerResult.updatePreviews : null;
       return {
         provider: contract.provider,
         contractVersion: contract.contractVersion,
         phase: 'generate_update_previews',
         capabilities: contract.capabilities,
         runId,
-        summary: prTitle || `Amp skeleton update preview for ${runId}`,
+        summary: liveUpdatePreviews?.summary || prTitle || `Amp skeleton update preview for ${runId}`,
         changedFiles,
-        providerRequest: providerRequest({
-          phase: 'generate_update_previews',
-          runId,
-          prompt: `Generate Jira and Confluence update preview text for ${runId}. Changed files: ${changedFiles.join(', ') || 'none'}`,
-          schema: 'enterprise-update-preview-v1',
-          manifest,
-          contextPack,
-        }),
-        audit: audit(),
+        jiraBody: liveUpdatePreviews?.jiraBody || null,
+        confluenceBody: liveUpdatePreviews?.confluenceBody || null,
+        providerRequest: {
+          ...request,
+          externalCallExecuted: providerResult.executed,
+          liveInvocationSucceeded: Boolean(providerResult.ok),
+          providerResultArtifact: providerResult.executed ? 'agent-adapter-update-previews-result.json' : null,
+          rawOutputArtifact: providerResult.executed ? 'amp-update-previews-raw-output.txt' : null,
+        },
+        providerResult,
+        audit: audit({ providerInvocationExecuted: providerResult.executed }),
       };
     },
     executeApprovedPlan({ root, runId, targetFile, setKey, setValue, manifest = {}, contextPack = {} }) {
       const absoluteTarget = resolve(root, targetFile);
       const relativeTarget = relative(root, absoluteTarget);
       if (relativeTarget.startsWith('..')) throw new Error('--target-file must stay inside repo');
+
+      const prompt = `Prepare an execution proposal for this approved Agent SDLC config change. Return one JSON object with targetFile, setKey, setValue, and notes. Do not write files or request tool use. The control plane will apply only the explicit CLI target regardless of provider output.\n\nExplicit targetFile: ${relativeTarget}\nExplicit setKey: ${setKey}\nExplicit setValue: ${setValue}`;
+      const request = providerRequest({
+        phase: 'execute_approved_plan',
+        runId,
+        prompt,
+        schema: 'execution-proposal-v1',
+        manifest,
+        contextPack,
+      });
+      const providerResult = invokeAmpExecutionProposal({ prompt, manifest, contextPack });
 
       applyConfigChange(absoluteTarget, setKey, setValue, runId);
       const configValidation = validateConfigFile(absoluteTarget);
@@ -231,15 +267,15 @@ export function createAmpAdapter() {
         capabilities: contract.capabilities,
         targetFile: relativeTarget,
         configValidation,
-        providerRequest: providerRequest({
-          phase: 'execute_approved_plan',
-          runId,
-          prompt: `Execute approved plan for ${relativeTarget} by setting ${setKey}. Live Amp execution is disabled; control plane performed deterministic local config write instead.`,
-          schema: 'execution-result-v1',
-          manifest,
-          contextPack,
-        }),
-        audit: audit({ localWrite: true }),
+        providerRequest: {
+          ...request,
+          externalCallExecuted: providerResult.executed,
+          liveInvocationSucceeded: Boolean(providerResult.ok),
+          providerResultArtifact: providerResult.executed ? 'agent-adapter-execution-proposal-result.json' : null,
+          rawOutputArtifact: providerResult.executed ? 'amp-execution-proposal-raw-output.txt' : null,
+        },
+        providerResult,
+        audit: audit({ localWrite: true, providerInvocationExecuted: providerResult.executed }),
       };
     },
   };

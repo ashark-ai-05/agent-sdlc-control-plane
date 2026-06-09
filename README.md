@@ -21,7 +21,7 @@ src/core/git.mjs                     # git and shell command wrappers
 src/core/policy.mjs                  # policy defaults/loading/validation
 src/core/approvals.mjs               # approval JSONL semantics
 src/core/config.mjs                  # config editing and validation helpers
-src/core/amp-runtime.mjs             # Amp runtime config/readiness checks without secret logging
+src/core/amp-runtime.mjs             # Amp runtime config/readiness/live phase checks without secret logging
 src/core/confidence.mjs              # validation command selection and confidence scoring
 src/core/repo.mjs                    # repo scanning, stack detection, config file discovery
 src/core/run-context.mjs             # run loading, run discovery, CLI failure helper
@@ -188,6 +188,8 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/implementation-plan.json
 .agentic-sdlc/runs/<run-id>/implementation-plan.md
 .agentic-sdlc/runs/<run-id>/agent-adapter.json
+.agentic-sdlc/runs/<run-id>/agent-adapter-execution-proposal-result.json # only when live Amp execution proposal runs
+.agentic-sdlc/runs/<run-id>/amp-execution-proposal-raw-output.txt        # only when live Amp execution proposal runs
 .agentic-sdlc/runs/<run-id>/changed-files.json
 .agentic-sdlc/runs/<run-id>/diff.patch
 .agentic-sdlc/runs/<run-id>/maven-output.txt
@@ -195,6 +197,8 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/validation-summary.json
 .agentic-sdlc/runs/<run-id>/confidence.json
 .agentic-sdlc/runs/<run-id>/agent-adapter-review.json
+.agentic-sdlc/runs/<run-id>/agent-adapter-review-result.json            # only when live Amp review runs
+.agentic-sdlc/runs/<run-id>/amp-review-raw-output.txt                   # only when live Amp review runs
 .agentic-sdlc/runs/<run-id>/change-review.json
 .agentic-sdlc/runs/<run-id>/change-review.md
 .agentic-sdlc/runs/<run-id>/events.jsonl
@@ -204,9 +208,9 @@ The `feature interpret` command runs the adapter `interpret_requirement` phase a
 
 The `feature plan` command runs `create_task_breakdown` and `create_implementation_plan`, writes task breakdown and implementation plan artifacts, and stops at `waiting_plan_approval` for human approval. With `--agent-adapter amp`, these phases default to request-artifact-only mode. If the same live/readiness opt-in is enabled, Amp can provide JSON task breakdown and implementation plan outputs; raw and parsed planning artifacts are persisted, but execution remains local-only.
 
-The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic safe config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`. The Amp skeleton keeps execution controlled by applying only the same explicit `--target-file`/`--set-key`/`--set-value` local config change and recording `providerInvocationExecuted: false`.
+The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic safe config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`. With live Amp enabled, `execute_approved_plan` may request an execution proposal artifact from Amp, but the provider output is advisory only: the control plane still applies only the explicit `--target-file`/`--set-key`/`--set-value` local change.
 
-The `feature review` command runs `review_changes` against the execution diff, validation summary, confidence, and changed files, then writes deterministic change-review artifacts before PR preview/approval.
+The `feature review` command runs `review_changes` against the execution diff, validation summary, confidence, and changed files, then writes deterministic change-review artifacts before PR preview/approval. With live Amp enabled, it can use a JSON review response for recommendation/findings/review focus while still performing no writes.
 
 For `.yaml`/`.yml` target files, dotted keys are written as nested YAML. For example `--set-key feature.enabled --set-value true` writes:
 

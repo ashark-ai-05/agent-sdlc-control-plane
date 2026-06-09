@@ -145,12 +145,11 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Add live Amp review behind the existing `amp` adapter readiness/config layer:
-   - keep skeleton/request-artifact mode as the default
-   - reuse `AGENT_SDLC_AMP_LIVE=true` and `AGENT_SDLC_AMP_ALLOW_NETWORK=true`
-   - invoke only `review_changes` next; keep execution local-only
-   - validate review JSON schema and persist raw/parsed artifacts
-   - keep execution gated and auditable
+1. Install/configure real Amp and verify command compatibility:
+   - set `AGENT_SDLC_AMP_COMMAND` and any phase-specific args
+   - run `provider check --provider amp`
+   - run live interpret/plan/review against a disposable repo
+   - tune prompts/args based on real CLI behavior
 2. Add a real persistence model option:
    - continue repo-local artifacts
    - optionally add SQLite for daemon run index/event querying

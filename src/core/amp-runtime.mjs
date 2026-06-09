@@ -91,6 +91,39 @@ export function normalizeImplementationPlan(parsed, fallbackSummary = 'Amp imple
   };
 }
 
+export function normalizeChangeReview(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const recommendation = firstString(parsed.recommendation, 'approve_with_human_review');
+  const findings = Array.isArray(parsed.findings) ? parsed.findings.map(String).filter(Boolean) : [];
+  const humanReviewFocus = Array.isArray(parsed.humanReviewFocus) ? parsed.humanReviewFocus.map(String).filter(Boolean) : [];
+  if (!findings.length && !humanReviewFocus.length) return null;
+  return {
+    recommendation,
+    findings,
+    humanReviewFocus,
+    riskAssessment: firstString(parsed.riskAssessment, parsed.risk, 'not_provided'),
+  };
+}
+
+export function normalizeExecutionProposal(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  return {
+    targetFile: firstString(parsed.targetFile, parsed.target_file),
+    setKey: firstString(parsed.setKey, parsed.set_key),
+    setValue: firstString(parsed.setValue, parsed.set_value),
+    notes: Array.isArray(parsed.notes) ? parsed.notes.map(String) : [],
+  };
+}
+
+export function normalizeUpdatePreviews(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const summary = firstString(parsed.summary, 'Amp update preview');
+  const jiraBody = firstString(parsed.jiraBody, parsed.jira?.body);
+  const confluenceBody = firstString(parsed.confluenceBody, parsed.confluence?.body);
+  if (!jiraBody && !confluenceBody) return null;
+  return { summary, jiraBody, confluenceBody };
+}
+
 export function ampConfigFrom({ manifest = {}, contextPack = {}, env = process.env } = {}) {
   const manifestAmp = manifest.amp || manifest.providers?.amp || {};
   const contextAmp = contextPack.amp || contextPack.providers?.amp || {};
@@ -109,12 +142,18 @@ export function ampConfigFrom({ manifest = {}, contextPack = {}, env = process.e
   const apiKeyEnv = firstString(manifestAmp.apiKeyEnv, contextAmp.apiKeyEnv, 'AMP_API_KEY');
   const interpretArgs = firstArray(env.AGENT_SDLC_AMP_INTERPRET_ARGS, manifestAmp.interpretArgs, contextAmp.interpretArgs);
   const planArgs = firstArray(env.AGENT_SDLC_AMP_PLAN_ARGS, manifestAmp.planArgs, contextAmp.planArgs, interpretArgs);
+  const reviewArgs = firstArray(env.AGENT_SDLC_AMP_REVIEW_ARGS, manifestAmp.reviewArgs, contextAmp.reviewArgs, planArgs);
+  const executionArgs = firstArray(env.AGENT_SDLC_AMP_EXECUTION_ARGS, manifestAmp.executionArgs, contextAmp.executionArgs, reviewArgs);
+  const updateArgs = firstArray(env.AGENT_SDLC_AMP_UPDATE_ARGS, manifestAmp.updateArgs, contextAmp.updateArgs, reviewArgs);
   const timeoutMs = Number(firstString(env.AGENT_SDLC_AMP_TIMEOUT_MS, manifestAmp.timeoutMs, contextAmp.timeoutMs, '30000'));
   return {
     provider: 'amp',
     command,
     interpretArgs,
     planArgs,
+    reviewArgs,
+    executionArgs,
+    updateArgs,
     timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30000,
     mode: liveInvocationRequested ? 'live_requested' : 'request_artifact_only',
     liveInvocationRequested,
@@ -129,6 +168,9 @@ export function ampConfigFrom({ manifest = {}, contextPack = {}, env = process.e
       model: 'AGENT_SDLC_AMP_MODEL',
       interpretArgs: 'AGENT_SDLC_AMP_INTERPRET_ARGS',
       planArgs: 'AGENT_SDLC_AMP_PLAN_ARGS',
+      reviewArgs: 'AGENT_SDLC_AMP_REVIEW_ARGS',
+      executionArgs: 'AGENT_SDLC_AMP_EXECUTION_ARGS',
+      updateArgs: 'AGENT_SDLC_AMP_UPDATE_ARGS',
       timeoutMs: 'AGENT_SDLC_AMP_TIMEOUT_MS',
       apiKey: apiKeyEnv,
     },
@@ -273,5 +315,53 @@ export function invokeAmpImplementationPlan({ prompt, fallbackSummary, manifest 
     ...result,
     ok: result.status === 0 && Boolean(implementationPlan),
     implementationPlan,
+  };
+}
+
+export function invokeAmpChangeReview({ prompt, manifest = {}, contextPack = {}, env = process.env } = {}) {
+  const result = runAmpJsonPhase({ prompt, manifest, contextPack, env, argsKey: 'reviewArgs' });
+  if (!result.executed) {
+    return {
+      ...result,
+      changeReview: null,
+    };
+  }
+  const changeReview = normalizeChangeReview(result.parsed);
+  return {
+    ...result,
+    ok: result.status === 0 && Boolean(changeReview),
+    changeReview,
+  };
+}
+
+export function invokeAmpExecutionProposal({ prompt, manifest = {}, contextPack = {}, env = process.env } = {}) {
+  const result = runAmpJsonPhase({ prompt, manifest, contextPack, env, argsKey: 'executionArgs' });
+  if (!result.executed) {
+    return {
+      ...result,
+      executionProposal: null,
+    };
+  }
+  const executionProposal = normalizeExecutionProposal(result.parsed);
+  return {
+    ...result,
+    ok: result.status === 0 && Boolean(executionProposal),
+    executionProposal,
+  };
+}
+
+export function invokeAmpUpdatePreviews({ prompt, manifest = {}, contextPack = {}, env = process.env } = {}) {
+  const result = runAmpJsonPhase({ prompt, manifest, contextPack, env, argsKey: 'updateArgs' });
+  if (!result.executed) {
+    return {
+      ...result,
+      updatePreviews: null,
+    };
+  }
+  const updatePreviews = normalizeUpdatePreviews(result.parsed);
+  return {
+    ...result,
+    ok: result.status === 0 && Boolean(updatePreviews),
+    updatePreviews,
   };
 }
