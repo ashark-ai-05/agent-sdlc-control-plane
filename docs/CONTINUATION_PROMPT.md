@@ -40,7 +40,8 @@ What already exists:
   - `agent-sdlc repo scan --repo <repo>`
   - `agent-sdlc policy validate --repo <repo>`
   - `agent-sdlc config validate --repo <repo> [--target-file <path>]`
-  - `agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]`
+  - `agent-sdlc provider check --repo <repo> --provider amp [--run <run-id>]`
+  - `agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change]`
   - `agent-sdlc run list --repo <repo> [--json]`
   - `agent-sdlc run status --repo <repo> --run <run-id> [--json]`
   - `agent-sdlc run audit-report --repo <repo> --run <run-id>`
@@ -144,9 +145,10 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Add live Amp invocation behind the existing `amp` adapter skeleton:
+1. Add live Amp invocation behind the existing `amp` adapter readiness/config layer:
    - keep skeleton/request-artifact mode as the default
-   - add explicit config/env checks before any SDK/CLI call
+   - require `AGENT_SDLC_AMP_LIVE=true` and `AGENT_SDLC_AMP_ALLOW_NETWORK=true` before any SDK/CLI call
+   - use `provider check --provider amp` readiness output as a preflight
    - persist provider session/thread metadata and structured outputs
    - keep execution gated and auditable
 2. Add a real persistence model option:

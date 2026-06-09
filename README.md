@@ -21,6 +21,7 @@ src/core/git.mjs                     # git and shell command wrappers
 src/core/policy.mjs                  # policy defaults/loading/validation
 src/core/approvals.mjs               # approval JSONL semantics
 src/core/config.mjs                  # config editing and validation helpers
+src/core/amp-runtime.mjs             # Amp runtime config/readiness checks without secret logging
 src/core/confidence.mjs              # validation command selection and confidence scoring
 src/core/repo.mjs                    # repo scanning, stack detection, config file discovery
 src/core/run-context.mjs             # run loading, run discovery, CLI failure helper
@@ -54,6 +55,11 @@ agent-sdlc policy validate \
 agent-sdlc config validate \
   --repo /path/to/repo \
   --target-file service-a/src/main/resources/application.yml
+
+agent-sdlc provider check \
+  --repo /path/to/repo \
+  --provider amp \
+  --run <run-id>
 
 agent-sdlc run init \
   --repo /path/to/repo \
@@ -164,6 +170,7 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 
 ```text
 .agentic-sdlc/repo-scan.json
+.agentic-sdlc/provider-readiness/amp.json
 .agentic-sdlc/policy-validation.json
 .agentic-sdlc/config-validation.json
 .agentic-sdlc/runs/<run-id>/agent-adapter-interpret-requirement.json
@@ -205,6 +212,8 @@ feature:
 Policy config is loaded from `.agentic-sdlc/policy.json` when present. It controls protected branches and validation gating defaults.
 
 The `repo scan` command writes `.agentic-sdlc/repo-scan.json` with current branch, branches, remotes, detected stack, detected validation commands, tracked/scanned/config/dirty file counts, config files, dirty files, and policy presence.
+
+The `provider check --provider amp` command writes `.agentic-sdlc/provider-readiness/amp.json` with Amp command availability, opt-in live invocation settings, blockers/warnings, and safe-default metadata. It records whether the configured API-key environment variable is present, but never logs the secret value.
 
 The `policy validate` command writes `.agentic-sdlc/policy-validation.json` with the effective policy, hard errors, and warnings for weakened safety settings.
 

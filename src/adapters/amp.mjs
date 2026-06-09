@@ -1,18 +1,26 @@
 import { relative, resolve } from 'node:path';
+import { checkAmpReadiness } from '../core/amp-runtime.mjs';
 import { applyConfigChange, validateConfigFile } from '../core/config.mjs';
 import { adapterContract } from './types.mjs';
 
-function providerRequest({ phase, runId, prompt, schema }) {
+function providerRequest({ phase, runId, prompt, schema, manifest = {}, contextPack = {} }) {
+  const readiness = checkAmpReadiness({ manifest, contextPack });
   return {
     provider: 'amp',
     phase,
     runId,
-    mode: 'request_artifact_only',
-    command: 'amp',
+    mode: readiness.config.mode,
+    command: readiness.command.name,
+    commandAvailable: readiness.command.available,
+    liveInvocationRequested: readiness.config.liveInvocationRequested,
+    liveInvocationReady: readiness.liveInvocationReady,
     prompt,
     expectedSchema: schema,
+    readiness,
     externalCallExecuted: false,
-    note: 'Amp provider invocation is intentionally not executed by this skeleton; the control plane records the phase request and keeps local safety gates/artifacts authoritative.',
+    note: readiness.liveInvocationReady
+      ? 'Live Amp invocation appears ready, but this slice still records request artifacts only; enable invocation in a later controlled step.'
+      : 'Amp provider invocation is not executed; the control plane records the phase request and keeps local safety gates/artifacts authoritative.',
   };
 }
 
@@ -38,6 +46,8 @@ export function createAmpAdapter() {
         runId,
         prompt: `Interpret this enterprise SDLC requirement for a controlled local workflow:\n\n${intent}`,
         schema: 'interpreted-requirement-v1',
+        manifest,
+        contextPack,
       });
       return {
         provider: contract.provider,
@@ -59,7 +69,7 @@ export function createAmpAdapter() {
         audit: audit(),
       };
     },
-    createTaskBreakdown({ runId, interpretedRequirement = {} }) {
+    createTaskBreakdown({ runId, manifest = {}, contextPack = {}, interpretedRequirement = {} }) {
       const intent = interpretedRequirement.intent || interpretedRequirement.summary || 'Unspecified requirement';
       return {
         provider: contract.provider,
@@ -86,11 +96,13 @@ export function createAmpAdapter() {
           runId,
           prompt: `Create a task breakdown for this requirement without writing files:\n\n${intent}`,
           schema: 'task-breakdown-v1',
+          manifest,
+          contextPack,
         }),
         audit: audit(),
       };
     },
-    createImplementationPlan({ runId, interpretedRequirement = {}, taskBreakdown = {} }) {
+    createImplementationPlan({ runId, manifest = {}, contextPack = {}, interpretedRequirement = {}, taskBreakdown = {} }) {
       const intent = interpretedRequirement.intent || interpretedRequirement.summary || 'Unspecified requirement';
       return {
         provider: contract.provider,
@@ -112,11 +124,13 @@ export function createAmpAdapter() {
           runId,
           prompt: `Create an implementation plan for this requirement without writing files:\n\n${intent}`,
           schema: 'implementation-plan-v1',
+          manifest,
+          contextPack,
         }),
         audit: audit(),
       };
     },
-    reviewChanges({ runId, changedFiles = [], validationSummary = {}, confidence = {}, diff = '' }) {
+    reviewChanges({ runId, manifest = {}, contextPack = {}, changedFiles = [], validationSummary = {}, confidence = {}, diff = '' }) {
       return {
         provider: contract.provider,
         contractVersion: contract.contractVersion,
@@ -138,6 +152,8 @@ export function createAmpAdapter() {
           runId,
           prompt: `Review this change set and validation evidence without creating external writes. Changed files: ${changedFiles.join(', ') || 'none'}`,
           schema: 'change-review-v1',
+          manifest,
+          contextPack,
         }),
         audit: audit(),
       };
@@ -156,11 +172,13 @@ export function createAmpAdapter() {
           runId,
           prompt: `Generate Jira and Confluence update preview text for ${runId}. Changed files: ${changedFiles.join(', ') || 'none'}`,
           schema: 'enterprise-update-preview-v1',
+          manifest,
+          contextPack,
         }),
         audit: audit(),
       };
     },
-    executeApprovedPlan({ root, runId, targetFile, setKey, setValue }) {
+    executeApprovedPlan({ root, runId, targetFile, setKey, setValue, manifest = {}, contextPack = {} }) {
       const absoluteTarget = resolve(root, targetFile);
       const relativeTarget = relative(root, absoluteTarget);
       if (relativeTarget.startsWith('..')) throw new Error('--target-file must stay inside repo');
@@ -181,6 +199,8 @@ export function createAmpAdapter() {
           runId,
           prompt: `Execute approved plan for ${relativeTarget} by setting ${setKey}. Live Amp execution is disabled; control plane performed deterministic local config write instead.`,
           schema: 'execution-result-v1',
+          manifest,
+          contextPack,
         }),
         audit: audit({ localWrite: true }),
       };

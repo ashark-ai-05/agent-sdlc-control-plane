@@ -1,6 +1,7 @@
 import { parseArgs } from './cli/args.mjs';
 import { approvalCommand } from './commands/approval.mjs';
 import { featureApplyEnterpriseUpdates, featureCreatePr, featureEnterprisePreview, featureExecute, featureInterpret, featurePlan, featurePrPreview, featureReview } from './commands/feature.mjs';
+import { providerCheck } from './commands/provider.mjs';
 import { runAuditReport, runInit, runList, runStatus } from './commands/run.mjs';
 import { configValidate, policyValidate, repoScan } from './commands/safety.mjs';
 import { daemonStart } from './daemon/server.mjs';
@@ -11,6 +12,7 @@ function usage() {
   agent-sdlc repo scan --repo <repo>
   agent-sdlc policy validate --repo <repo>
   agent-sdlc config validate --repo <repo> [--target-file <path>]
+  agent-sdlc provider check --repo <repo> --provider amp [--run <run-id>]
   agent-sdlc run init --repo <repo> --run <run-id> [--workflow-type feature_config_change] [--validation-command 'npm test'] [--force]
   agent-sdlc run list --repo <repo> [--json]
   agent-sdlc feature interpret --repo <repo> --run <run-id> --requirement <text> [--agent-adapter mock-agent|amp]
@@ -34,6 +36,7 @@ export function main(argv = process.argv.slice(2)) {
   const [domain, action] = args._;
   if (domain === 'daemon' && action === 'start') daemonStart(args);
   else if (domain === 'repo' && action === 'scan') repoScan(args);
+  else if (domain === 'provider' && action === 'check') providerCheck(args);
   else if (domain === 'policy' && action === 'validate') policyValidate(args);
   else if (domain === 'config' && action === 'validate') configValidate(args);
   else if (domain === 'run' && action === 'init') runInit(args);

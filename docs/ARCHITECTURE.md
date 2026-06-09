@@ -74,6 +74,7 @@ src/core/git.mjs                     git and shell command wrappers
 src/core/policy.mjs                  policy defaults/loading/validation
 src/core/approvals.mjs               approval JSONL semantics
 src/core/config.mjs                  config editing and validation helpers
+src/core/amp-runtime.mjs             Amp runtime config/readiness checks without secret logging
 src/core/confidence.mjs              validation command selection and confidence scoring
 src/core/repo.mjs                    repo scanning, stack detection, config file discovery
 src/core/run-context.mjs             run loading, run discovery, CLI failure helper
@@ -83,7 +84,7 @@ src/daemon/mission-control-html.mjs  standalone mission-control HTML
 bin/agent-sdlc.mjs                   thin executable entrypoint
 ```
 
-Implements repo scan, config validation, policy validation, run initialization, approvals, controlled execution, PR preview, PR request dry-run, enterprise previews, audit report, and local daemon startup.
+Implements repo scan, config validation, policy validation, provider readiness checks, run initialization, approvals, controlled execution, PR preview, PR request dry-run, enterprise previews, audit report, and local daemon startup.
 
 ### Local daemon and mission-control UI
 
@@ -182,4 +183,4 @@ generate_update_previews
 
 The first implemented adapter is `mock-agent`, which supports deterministic local requirement interpretation through `interpret_requirement`, task breakdown + implementation planning through `create_task_breakdown`/`create_implementation_plan`, deterministic local config changes through `execute_approved_plan`, deterministic review through `review_changes`, and update-preview metadata through `generate_update_previews`. It writes adapter artifacts for auditability.
 
-The second adapter is `amp`, a skeleton behind the same phase contract. It records Amp provider request prompts/schemas and audit metadata for every phase while keeping `providerInvocationExecuted: false`. Its execution phase still uses the control plane's explicit local config edit (`--target-file`, `--set-key`, `--set-value`) so the provider seam can be tested without uncontrolled SDK/CLI writes. The next step is to add live Amp SDK/CLI invocation behind explicit configuration, provider availability checks, streaming/session metadata, and the existing approval gates.
+The second adapter is `amp`, a skeleton behind the same phase contract. It records Amp provider request prompts/schemas and audit metadata for every phase while keeping `providerInvocationExecuted: false`. Its provider requests now include readiness/config metadata from `src/core/amp-runtime.mjs`, including command availability, live-invocation opt-in state, blockers/warnings, and secret-safe API-key presence. Its execution phase still uses the control plane's explicit local config edit (`--target-file`, `--set-key`, `--set-value`) so the provider seam can be tested without uncontrolled SDK/CLI writes. The next step is to add live Amp SDK/CLI invocation behind explicit configuration, provider availability checks, streaming/session metadata, and the existing approval gates.

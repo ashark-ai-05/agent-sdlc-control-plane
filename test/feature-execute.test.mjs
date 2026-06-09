@@ -79,6 +79,26 @@ test('feature plan creates task breakdown and implementation plan artifacts', ()
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /implementation_plan_created/);
 });
 
+test('provider check writes Amp readiness without exposing credentials', () => {
+  const repo = makeRepo();
+  const result = spawnSync('node', [cli, 'provider', 'check', '--repo', repo, '--provider', 'amp', '--run', 'run-1'], {
+    encoding: 'utf8',
+    env: { ...process.env, AMP_API_KEY: 'secret-test-value' },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.provider, 'amp');
+  assert.equal(payload.config.apiKeyPresent, true);
+  assert.equal(payload.safeDefault.externalCallExecuted, false);
+  assert.equal(payload.safeDefault.credentialsLogged, false);
+  assert.match(payload.artifact, /provider-readiness\/amp\.json/);
+  assert.doesNotMatch(result.stdout, /secret-test-value/);
+
+  const artifact = readFileSync(join(repo, '.agentic-sdlc/provider-readiness/amp.json'), 'utf8');
+  assert.match(artifact, /live Amp invocation is not requested/);
+  assert.doesNotMatch(artifact, /secret-test-value/);
+});
+
 test('amp adapter skeleton records provider requests across planning and execution phases', () => {
   const repo = makeRepo();
   const interpret = spawnSync('node', [cli, 'feature', 'interpret', '--repo', repo, '--run', 'run-1', '--requirement', 'Enable feature flag for service-a', '--agent-adapter', 'amp'], { encoding: 'utf8' });
@@ -86,6 +106,7 @@ test('amp adapter skeleton records provider requests across planning and executi
   const interpretedPayload = JSON.parse(interpret.stdout);
   assert.equal(interpretedPayload.adapter.provider, 'amp');
   assert.equal(interpretedPayload.interpretedRequirement.providerRequest.externalCallExecuted, false);
+  assert.equal(interpretedPayload.interpretedRequirement.providerRequest.readiness.safeDefault.credentialsLogged, false);
   assert.match(interpretedPayload.interpretedRequirement.constraints.join('\n'), /no Amp SDK\/CLI call/);
 
   const plan = spawnSync('node', [cli, 'feature', 'plan', '--repo', repo, '--run', 'run-1', '--agent-adapter', 'amp'], { encoding: 'utf8' });
@@ -447,6 +468,7 @@ test('source code uses production module directories and thin entrypoints', () =
     '../src/core/policy.mjs',
     '../src/core/approvals.mjs',
     '../src/core/config.mjs',
+    '../src/core/amp-runtime.mjs',
     '../src/adapters/index.mjs',
     '../src/adapters/mock-agent.mjs',
     '../src/adapters/amp.mjs',
@@ -456,6 +478,7 @@ test('source code uses production module directories and thin entrypoints', () =
     '../src/core/run-context.mjs',
     '../src/core/text.mjs',
     '../src/commands/feature.mjs',
+    '../src/commands/provider.mjs',
     '../src/commands/run.mjs',
     '../src/commands/approval.mjs',
     '../src/commands/safety.mjs',
