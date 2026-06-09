@@ -11,6 +11,7 @@ src/cli/args.mjs                     # CLI argument parsing
 src/adapters/types.mjs                # provider adapter contract phases
 src/adapters/index.mjs                # provider adapter resolver
 src/adapters/mock-agent.mjs           # deterministic local mock execution adapter
+src/adapters/amp.mjs                  # Amp adapter skeleton with provider request artifacts
 src/commands/feature.mjs             # feature execution, PR preview/request, enterprise previews
 src/commands/run.mjs                 # run init/list/status/audit-report commands
 src/commands/approval.mjs            # approval gate commands
@@ -186,11 +187,11 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/events.jsonl
 ```
 
-The `feature interpret` command runs the adapter `interpret_requirement` phase and writes `interpreted-requirement.json`, `interpreted-requirement.md`, and `agent-adapter-interpret-requirement.json`. The mock adapter is deterministic/local-only and stops at `waiting_requirement_approval` so a human can approve or correct the interpretation before planning/execution.
+The `feature interpret` command runs the adapter `interpret_requirement` phase and writes `interpreted-requirement.json`, `interpreted-requirement.md`, and `agent-adapter-interpret-requirement.json`. The mock adapter is deterministic/local-only and stops at `waiting_requirement_approval` so a human can approve or correct the interpretation before planning/execution. The `amp` adapter is also available; in the current skeleton it records provider request artifacts for Amp but does not call the Amp SDK/CLI.
 
-The `feature plan` command runs `create_task_breakdown` and `create_implementation_plan`, writes task breakdown and implementation plan artifacts, and stops at `waiting_plan_approval` for human approval.
+The `feature plan` command runs `create_task_breakdown` and `create_implementation_plan`, writes task breakdown and implementation plan artifacts, and stops at `waiting_plan_approval` for human approval. With `--agent-adapter amp`, these artifacts include request-artifact-only Amp prompts/schemas for future live provider invocation.
 
-The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic mock adapter config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`.
+The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic safe config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`. The Amp skeleton keeps execution controlled by applying only the same explicit `--target-file`/`--set-key`/`--set-value` local config change and recording `providerInvocationExecuted: false`.
 
 The `feature review` command runs `review_changes` against the execution diff, validation summary, confidence, and changed files, then writes deterministic change-review artifacts before PR preview/approval.
 

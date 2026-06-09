@@ -64,6 +64,7 @@ src/cli/args.mjs                     CLI argument parsing
 src/adapters/types.mjs                provider adapter phase contract
 src/adapters/index.mjs                provider adapter resolver
 src/adapters/mock-agent.mjs           deterministic local mock execution adapter
+src/adapters/amp.mjs                  Amp adapter skeleton with request-artifact-only provider metadata
 src/commands/feature.mjs             feature execution, PR preview/request, enterprise previews
 src/commands/run.mjs                 run init/list/status/audit-report commands
 src/commands/approval.mjs            approval gate commands
@@ -179,4 +180,6 @@ review_changes
 generate_update_previews
 ```
 
-The first implemented adapter is `mock-agent`, which supports deterministic local requirement interpretation through `interpret_requirement`, task breakdown + implementation planning through `create_task_breakdown`/`create_implementation_plan`, deterministic local config changes through `execute_approved_plan`, deterministic review through `review_changes`, and update-preview metadata through `generate_update_previews`. It writes adapter artifacts for auditability. Add Amp SDK, then Copilot or other providers behind this interface.
+The first implemented adapter is `mock-agent`, which supports deterministic local requirement interpretation through `interpret_requirement`, task breakdown + implementation planning through `create_task_breakdown`/`create_implementation_plan`, deterministic local config changes through `execute_approved_plan`, deterministic review through `review_changes`, and update-preview metadata through `generate_update_previews`. It writes adapter artifacts for auditability.
+
+The second adapter is `amp`, a skeleton behind the same phase contract. It records Amp provider request prompts/schemas and audit metadata for every phase while keeping `providerInvocationExecuted: false`. Its execution phase still uses the control plane's explicit local config edit (`--target-file`, `--set-key`, `--set-value`) so the provider seam can be tested without uncontrolled SDK/CLI writes. The next step is to add live Amp SDK/CLI invocation behind explicit configuration, provider availability checks, streaming/session metadata, and the existing approval gates.

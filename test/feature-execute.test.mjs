@@ -79,6 +79,43 @@ test('feature plan creates task breakdown and implementation plan artifacts', ()
   assert.match(readFileSync(join(runDir, 'events.jsonl'), 'utf8'), /implementation_plan_created/);
 });
 
+test('amp adapter skeleton records provider requests across planning and execution phases', () => {
+  const repo = makeRepo();
+  const interpret = spawnSync('node', [cli, 'feature', 'interpret', '--repo', repo, '--run', 'run-1', '--requirement', 'Enable feature flag for service-a', '--agent-adapter', 'amp'], { encoding: 'utf8' });
+  assert.equal(interpret.status, 0, interpret.stderr || interpret.stdout);
+  const interpretedPayload = JSON.parse(interpret.stdout);
+  assert.equal(interpretedPayload.adapter.provider, 'amp');
+  assert.equal(interpretedPayload.interpretedRequirement.providerRequest.externalCallExecuted, false);
+  assert.match(interpretedPayload.interpretedRequirement.constraints.join('\n'), /no Amp SDK\/CLI call/);
+
+  const plan = spawnSync('node', [cli, 'feature', 'plan', '--repo', repo, '--run', 'run-1', '--agent-adapter', 'amp'], { encoding: 'utf8' });
+  assert.equal(plan.status, 0, plan.stderr || plan.stdout);
+  const planPayload = JSON.parse(plan.stdout);
+  assert.equal(planPayload.adapter.provider, 'amp');
+  assert.equal(planPayload.taskBreakdown.providerRequest.mode, 'request_artifact_only');
+  assert.match(planPayload.implementationPlan.steps.join('\n'), /Live Amp execution is configured|deterministic control-plane/);
+
+  const execute = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--agent-adapter', 'amp', '--auto-approve'], { encoding: 'utf8' });
+  assert.equal(execute.status, 0, execute.stderr || execute.stdout);
+  const executePayload = JSON.parse(execute.stdout);
+  assert.equal(executePayload.adapter.provider, 'amp');
+  assert.equal(executePayload.adapter.audit.providerInvocationExecuted, false);
+  assert.equal(executePayload.adapter.audit.controlledLocalWrite, true);
+  assert.equal(executePayload.adapter.providerRequest.externalCallExecuted, false);
+
+  const review = spawnSync('node', [cli, 'feature', 'review', '--repo', repo, '--run', 'run-1', '--agent-adapter', 'amp'], { encoding: 'utf8' });
+  assert.equal(review.status, 0, review.stderr || review.stdout);
+  const reviewPayload = JSON.parse(review.stdout);
+  assert.equal(reviewPayload.adapter.provider, 'amp');
+  assert.match(reviewPayload.review.findings.join('\n'), /Amp review request recorded/);
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'interpreted-requirement.json'), 'utf8'), /request_artifact_only/);
+  assert.match(readFileSync(join(runDir, 'implementation-plan.json'), 'utf8'), /implementation-plan-v1/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter.json'), 'utf8'), /safe_local_config_change/);
+  assert.match(readFileSync(join(runDir, 'change-review.json'), 'utf8'), /change-review-v1/);
+});
+
 test('feature review creates change review artifacts after execution', () => {
   const repo = makeRepo();
   const execute = spawnSync('node', [cli, 'feature', 'execute', '--repo', repo, '--run', 'run-1', '--target-file', 'src/main/resources/application.yml', '--set-key', 'feature.enabled', '--set-value', 'true', '--mock-agent', '--auto-approve'], { encoding: 'utf8' });
@@ -412,6 +449,7 @@ test('source code uses production module directories and thin entrypoints', () =
     '../src/core/config.mjs',
     '../src/adapters/index.mjs',
     '../src/adapters/mock-agent.mjs',
+    '../src/adapters/amp.mjs',
     '../src/adapters/types.mjs',
     '../src/core/confidence.mjs',
     '../src/core/repo.mjs',

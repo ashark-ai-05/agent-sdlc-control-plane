@@ -45,10 +45,10 @@ What already exists:
   - `agent-sdlc run status --repo <repo> --run <run-id> [--json]`
   - `agent-sdlc run audit-report --repo <repo> --run <run-id>`
   - `agent-sdlc approval list|approve|reject --repo <repo> --run <run-id> ...`
-  - `agent-sdlc feature interpret --repo <repo> --run <run-id> --requirement <text> --agent-adapter mock-agent`
-  - `agent-sdlc feature plan --repo <repo> --run <run-id> --agent-adapter mock-agent`
-  - `agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> --mock-agent --auto-approve`
-  - `agent-sdlc feature review --repo <repo> --run <run-id> --agent-adapter mock-agent`
+  - `agent-sdlc feature interpret --repo <repo> --run <run-id> --requirement <text> --agent-adapter mock-agent|amp`
+  - `agent-sdlc feature plan --repo <repo> --run <run-id> --agent-adapter mock-agent|amp`
+  - `agent-sdlc feature execute --repo <repo> --run <run-id> --target-file <path> --set-key <key> --set-value <value> --mock-agent|--agent-adapter amp --auto-approve`
+  - `agent-sdlc feature review --repo <repo> --run <run-id> --agent-adapter mock-agent|amp`
   - `agent-sdlc feature pr-preview --repo <repo> --run <run-id>`
   - `agent-sdlc feature create-pr --repo <repo> --run <run-id> --provider stash --project-key <key> --repo-slug <slug> --reviewers alice,bob --dry-run`
   - `agent-sdlc feature enterprise-preview --repo <repo> --run <run-id> --jira-key ABC-123 --confluence-page-id 12345`
@@ -144,9 +144,10 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Add Amp SDK adapter behind the existing provider adapter interface:
-   - implement only one phase first, likely `interpret_requirement` or `create_implementation_plan`
-   - persist provider session/thread metadata
+1. Add live Amp invocation behind the existing `amp` adapter skeleton:
+   - keep skeleton/request-artifact mode as the default
+   - add explicit config/env checks before any SDK/CLI call
+   - persist provider session/thread metadata and structured outputs
    - keep execution gated and auditable
 2. Add a real persistence model option:
    - continue repo-local artifacts
