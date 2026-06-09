@@ -179,6 +179,10 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 .agentic-sdlc/runs/<run-id>/interpreted-requirement.json
 .agentic-sdlc/runs/<run-id>/interpreted-requirement.md
 .agentic-sdlc/runs/<run-id>/agent-adapter-plan.json
+.agentic-sdlc/runs/<run-id>/agent-adapter-task-breakdown-result.json     # only when live Amp planning runs
+.agentic-sdlc/runs/<run-id>/amp-task-breakdown-raw-output.txt            # only when live Amp planning runs
+.agentic-sdlc/runs/<run-id>/agent-adapter-implementation-plan-result.json # only when live Amp planning runs
+.agentic-sdlc/runs/<run-id>/amp-implementation-plan-raw-output.txt        # only when live Amp planning runs
 .agentic-sdlc/runs/<run-id>/task-breakdown.json
 .agentic-sdlc/runs/<run-id>/task-breakdown.md
 .agentic-sdlc/runs/<run-id>/implementation-plan.json
@@ -198,7 +202,7 @@ With `--auto-approve`, the command records the `execution` approval gate for dem
 
 The `feature interpret` command runs the adapter `interpret_requirement` phase and writes `interpreted-requirement.json`, `interpreted-requirement.md`, and `agent-adapter-interpret-requirement.json`. The mock adapter is deterministic/local-only and stops at `waiting_requirement_approval` so a human can approve or correct the interpretation before planning/execution. The `amp` adapter is also available; by default it records provider request artifacts without calling Amp. If `AGENT_SDLC_AMP_LIVE=true`, `AGENT_SDLC_AMP_ALLOW_NETWORK=true`, and readiness passes, only the `interpret_requirement` phase invokes the configured Amp command. That live path is read-only/no-write and persists `agent-adapter-interpret-result.json` plus `amp-interpret-raw-output.txt` for audit.
 
-The `feature plan` command runs `create_task_breakdown` and `create_implementation_plan`, writes task breakdown and implementation plan artifacts, and stops at `waiting_plan_approval` for human approval. With `--agent-adapter amp`, these artifacts include request-artifact-only Amp prompts/schemas for future live provider invocation.
+The `feature plan` command runs `create_task_breakdown` and `create_implementation_plan`, writes task breakdown and implementation plan artifacts, and stops at `waiting_plan_approval` for human approval. With `--agent-adapter amp`, these phases default to request-artifact-only mode. If the same live/readiness opt-in is enabled, Amp can provide JSON task breakdown and implementation plan outputs; raw and parsed planning artifacts are persisted, but execution remains local-only.
 
 The `feature execute` command creates/checks out `manifest.workingBranch` or `agent-sdlc/<run-id>`, resolves an agent adapter, applies the deterministic safe config change, captures adapter metadata, captures diff and changed files, validates the edited config file, runs validation commands from the manifest/context pack, computes evidence-based confidence, then stops at `waiting_pr_approval`. The Amp skeleton keeps execution controlled by applying only the same explicit `--target-file`/`--set-key`/`--set-value` local config change and recording `providerInvocationExecuted: false`.
 

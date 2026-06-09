@@ -145,12 +145,11 @@ http://127.0.0.1:4317
 ```
 
 Recommended next implementation chunks:
-1. Add live Amp planning phases behind the existing `amp` adapter readiness/config layer:
+1. Add live Amp review behind the existing `amp` adapter readiness/config layer:
    - keep skeleton/request-artifact mode as the default
    - reuse `AGENT_SDLC_AMP_LIVE=true` and `AGENT_SDLC_AMP_ALLOW_NETWORK=true`
-   - use `provider check --provider amp` readiness output as a preflight
-   - invoke only `create_task_breakdown` / `create_implementation_plan` next; keep execution local-only
-   - persist provider session/thread metadata and structured outputs
+   - invoke only `review_changes` next; keep execution local-only
+   - validate review JSON schema and persist raw/parsed artifacts
    - keep execution gated and auditable
 2. Add a real persistence model option:
    - continue repo-local artifacts

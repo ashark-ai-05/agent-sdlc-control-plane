@@ -64,6 +64,33 @@ export function normalizeInterpretedRequirement(parsed, fallbackIntent) {
   };
 }
 
+export function normalizeTaskBreakdown(parsed) {
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.tasks)) return null;
+  const tasks = parsed.tasks.map((task, index) => ({
+    id: firstString(task.id, `task-${index + 1}`),
+    title: firstString(task.title, task.summary, `Task ${index + 1}`),
+    type: firstString(task.type, 'provider_planning_request'),
+    risk: firstString(task.risk, 'medium'),
+  })).filter((task) => task.title);
+  if (!tasks.length) return null;
+  return { tasks };
+}
+
+export function normalizeImplementationPlan(parsed, fallbackSummary = 'Amp implementation plan') {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const steps = Array.isArray(parsed.steps) ? parsed.steps.map(String).filter(Boolean) : [];
+  if (!steps.length) return null;
+  const requiredApprovals = Array.isArray(parsed.requiredApprovals)
+    ? parsed.requiredApprovals.map(String)
+    : ['implementation_plan', 'execution', 'pr_creation'];
+  return {
+    summary: firstString(parsed.summary, fallbackSummary),
+    steps,
+    tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(String) : [],
+    requiredApprovals,
+  };
+}
+
 export function ampConfigFrom({ manifest = {}, contextPack = {}, env = process.env } = {}) {
   const manifestAmp = manifest.amp || manifest.providers?.amp || {};
   const contextAmp = contextPack.amp || contextPack.providers?.amp || {};
@@ -81,11 +108,13 @@ export function ampConfigFrom({ manifest = {}, contextPack = {}, env = process.e
   const model = firstString(env.AGENT_SDLC_AMP_MODEL, manifestAmp.model, contextAmp.model);
   const apiKeyEnv = firstString(manifestAmp.apiKeyEnv, contextAmp.apiKeyEnv, 'AMP_API_KEY');
   const interpretArgs = firstArray(env.AGENT_SDLC_AMP_INTERPRET_ARGS, manifestAmp.interpretArgs, contextAmp.interpretArgs);
+  const planArgs = firstArray(env.AGENT_SDLC_AMP_PLAN_ARGS, manifestAmp.planArgs, contextAmp.planArgs, interpretArgs);
   const timeoutMs = Number(firstString(env.AGENT_SDLC_AMP_TIMEOUT_MS, manifestAmp.timeoutMs, contextAmp.timeoutMs, '30000'));
   return {
     provider: 'amp',
     command,
     interpretArgs,
+    planArgs,
     timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30000,
     mode: liveInvocationRequested ? 'live_requested' : 'request_artifact_only',
     liveInvocationRequested,
@@ -99,6 +128,7 @@ export function ampConfigFrom({ manifest = {}, contextPack = {}, env = process.e
       allowNetwork: 'AGENT_SDLC_AMP_ALLOW_NETWORK',
       model: 'AGENT_SDLC_AMP_MODEL',
       interpretArgs: 'AGENT_SDLC_AMP_INTERPRET_ARGS',
+      planArgs: 'AGENT_SDLC_AMP_PLAN_ARGS',
       timeoutMs: 'AGENT_SDLC_AMP_TIMEOUT_MS',
       apiKey: apiKeyEnv,
     },
@@ -155,7 +185,7 @@ export function checkAmpReadiness({ manifest = {}, contextPack = {}, env = proce
   };
 }
 
-export function invokeAmpInterpretRequirement({ prompt, requirement, manifest = {}, contextPack = {}, env = process.env } = {}) {
+function runAmpJsonPhase({ prompt, manifest = {}, contextPack = {}, env = process.env, argsKey = 'interpretArgs' }) {
   const readiness = checkAmpReadiness({ manifest, contextPack, env });
   if (!readiness.liveInvocationReady) {
     return {
@@ -163,12 +193,12 @@ export function invokeAmpInterpretRequirement({ prompt, requirement, manifest = 
       reason: 'readiness_failed',
       readiness,
       parsed: null,
-      interpretedRequirement: null,
     };
   }
 
   const startedAt = new Date().toISOString();
-  const result = spawnSync(readiness.config.command, readiness.config.interpretArgs, {
+  const args = readiness.config[argsKey] || [];
+  const result = spawnSync(readiness.config.command, args, {
     input: prompt,
     encoding: 'utf8',
     timeout: readiness.config.timeoutMs,
@@ -179,23 +209,69 @@ export function invokeAmpInterpretRequirement({ prompt, requirement, manifest = 
   const stdout = truncate(result.stdout);
   const stderr = truncate(result.stderr);
   const parsed = parseJsonObject(stdout);
-  const interpretedRequirement = normalizeInterpretedRequirement(parsed, requirement);
 
   return {
     executed: true,
     provider: 'amp',
     command: readiness.config.command,
-    args: readiness.config.interpretArgs,
+    args,
     status: result.status,
     signal: result.signal || null,
     error: result.error ? result.error.message : null,
-    ok: result.status === 0 && Boolean(interpretedRequirement),
     startedAt,
     completedAt,
     stdout,
     stderr,
     parsed,
-    interpretedRequirement,
     readiness,
+  };
+}
+
+export function invokeAmpInterpretRequirement({ prompt, requirement, manifest = {}, contextPack = {}, env = process.env } = {}) {
+  const result = runAmpJsonPhase({ prompt, manifest, contextPack, env, argsKey: 'interpretArgs' });
+  if (!result.executed) {
+    return {
+      ...result,
+      interpretedRequirement: null,
+    };
+  }
+  const interpretedRequirement = normalizeInterpretedRequirement(result.parsed, requirement);
+
+  return {
+    ...result,
+    ok: result.status === 0 && Boolean(interpretedRequirement),
+    interpretedRequirement,
+  };
+}
+
+export function invokeAmpTaskBreakdown({ prompt, manifest = {}, contextPack = {}, env = process.env } = {}) {
+  const result = runAmpJsonPhase({ prompt, manifest, contextPack, env, argsKey: 'planArgs' });
+  if (!result.executed) {
+    return {
+      ...result,
+      taskBreakdown: null,
+    };
+  }
+  const taskBreakdown = normalizeTaskBreakdown(result.parsed);
+  return {
+    ...result,
+    ok: result.status === 0 && Boolean(taskBreakdown),
+    taskBreakdown,
+  };
+}
+
+export function invokeAmpImplementationPlan({ prompt, fallbackSummary, manifest = {}, contextPack = {}, env = process.env } = {}) {
+  const result = runAmpJsonPhase({ prompt, manifest, contextPack, env, argsKey: 'planArgs' });
+  if (!result.executed) {
+    return {
+      ...result,
+      implementationPlan: null,
+    };
+  }
+  const implementationPlan = normalizeImplementationPlan(result.parsed, fallbackSummary);
+  return {
+    ...result,
+    ok: result.status === 0 && Boolean(implementationPlan),
+    implementationPlan,
   };
 }

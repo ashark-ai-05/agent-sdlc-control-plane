@@ -143,6 +143,62 @@ process.stdin.on('end', () => {
   assert.doesNotMatch(readFileSync(join(runDir, 'interpreted-requirement.json'), 'utf8'), /secret-test-value/);
 });
 
+test('amp live planning invokes configured command for task breakdown and plan only after opt-in', () => {
+  const repo = makeRepo();
+  const fakeAmp = join(repo, 'fake-amp-plan.mjs');
+  writeFileSync(fakeAmp, `#!/usr/bin/env node
+let input = '';
+process.stdin.on('data', (chunk) => { input += chunk.toString(); });
+process.stdin.on('end', () => {
+  if (input.includes('task breakdown')) {
+    console.log(JSON.stringify({
+      tasks: [
+        { id: 'live-task-1', title: 'Live task from Amp', type: 'implementation', risk: 'low' },
+        { id: 'live-task-2', title: 'Validate live plan artifacts', type: 'validation', risk: 'low' }
+      ]
+    }));
+  } else {
+    console.log(JSON.stringify({
+      summary: 'Live implementation plan from Amp',
+      steps: ['Apply explicit config change', 'Run validation evidence capture'],
+      tasks: ['live-task-1', 'live-task-2'],
+      requiredApprovals: ['implementation_plan', 'execution', 'pr_creation']
+    }));
+  }
+});
+`);
+  chmodSync(fakeAmp, 0o755);
+
+  const interpret = spawnSync('node', [cli, 'feature', 'interpret', '--repo', repo, '--run', 'run-1', '--requirement', 'Enable feature flag for service-a', '--agent-adapter', 'amp'], { encoding: 'utf8' });
+  assert.equal(interpret.status, 0, interpret.stderr || interpret.stdout);
+
+  const result = spawnSync('node', [cli, 'feature', 'plan', '--repo', repo, '--run', 'run-1', '--agent-adapter', 'amp'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      AGENT_SDLC_AMP_LIVE: 'true',
+      AGENT_SDLC_AMP_ALLOW_NETWORK: 'true',
+      AGENT_SDLC_AMP_COMMAND: fakeAmp,
+      AMP_API_KEY: 'secret-test-value',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stdout, /secret-test-value/);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.taskBreakdown.tasks[0].id, 'live-task-1');
+  assert.equal(payload.taskBreakdown.providerRequest.externalCallExecuted, true);
+  assert.equal(payload.implementationPlan.summary, 'Live implementation plan from Amp');
+  assert.equal(payload.implementationPlan.providerRequest.liveInvocationSucceeded, true);
+  assert.equal(payload.implementationPlan.audit.providerInvocationExecuted, true);
+
+  const runDir = join(repo, '.agentic-sdlc/runs/run-1');
+  assert.match(readFileSync(join(runDir, 'amp-task-breakdown-raw-output.txt'), 'utf8'), /Live task from Amp/);
+  assert.match(readFileSync(join(runDir, 'amp-implementation-plan-raw-output.txt'), 'utf8'), /Live implementation plan from Amp/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-task-breakdown-result.json'), 'utf8'), /live-task-1/);
+  assert.match(readFileSync(join(runDir, 'agent-adapter-implementation-plan-result.json'), 'utf8'), /Live implementation plan from Amp/);
+  assert.doesNotMatch(readFileSync(join(runDir, 'implementation-plan.json'), 'utf8'), /secret-test-value/);
+});
+
 test('amp adapter skeleton records provider requests across planning and execution phases', () => {
   const repo = makeRepo();
   const interpret = spawnSync('node', [cli, 'feature', 'interpret', '--repo', repo, '--run', 'run-1', '--requirement', 'Enable feature flag for service-a', '--agent-adapter', 'amp'], { encoding: 'utf8' });

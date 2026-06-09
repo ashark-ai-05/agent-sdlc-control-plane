@@ -96,8 +96,40 @@ export function featurePlan(args) {
   const planMarkdown = `# Implementation plan\n\n## Summary\n\n${implementationPlan.summary}\n\n## Steps\n\n${implementationPlan.steps.map((step, index) => `${index + 1}. ${step}`).join('\n')}\n\n## Required approvals\n\n${bulletList(implementationPlan.requiredApprovals)}\n\nHuman execution approval is required before file writes outside demo auto-approve mode.\n`;
 
   writeJson(join(runDir, 'task-breakdown.json'), { runId, repository: root, ...taskBreakdown });
+  if (taskBreakdown.providerResult?.executed) {
+    writeJson(join(runDir, 'agent-adapter-task-breakdown-result.json'), {
+      provider: taskBreakdown.provider,
+      phase: taskBreakdown.phase,
+      ok: taskBreakdown.providerResult.ok,
+      status: taskBreakdown.providerResult.status,
+      signal: taskBreakdown.providerResult.signal,
+      error: taskBreakdown.providerResult.error,
+      startedAt: taskBreakdown.providerResult.startedAt,
+      completedAt: taskBreakdown.providerResult.completedAt,
+      parsed: taskBreakdown.providerResult.parsed,
+      taskBreakdown: taskBreakdown.providerResult.taskBreakdown,
+      readiness: taskBreakdown.providerResult.readiness,
+    });
+    writeFileSync(join(runDir, 'amp-task-breakdown-raw-output.txt'), taskBreakdown.providerResult.stdout || '');
+  }
   writeFileSync(join(runDir, 'task-breakdown.md'), taskMarkdown);
   writeJson(join(runDir, 'implementation-plan.json'), { runId, repository: root, ...implementationPlan });
+  if (implementationPlan.providerResult?.executed) {
+    writeJson(join(runDir, 'agent-adapter-implementation-plan-result.json'), {
+      provider: implementationPlan.provider,
+      phase: implementationPlan.phase,
+      ok: implementationPlan.providerResult.ok,
+      status: implementationPlan.providerResult.status,
+      signal: implementationPlan.providerResult.signal,
+      error: implementationPlan.providerResult.error,
+      startedAt: implementationPlan.providerResult.startedAt,
+      completedAt: implementationPlan.providerResult.completedAt,
+      parsed: implementationPlan.providerResult.parsed,
+      implementationPlan: implementationPlan.providerResult.implementationPlan,
+      readiness: implementationPlan.providerResult.readiness,
+    });
+    writeFileSync(join(runDir, 'amp-implementation-plan-raw-output.txt'), implementationPlan.providerResult.stdout || '');
+  }
   writeFileSync(join(runDir, 'implementation-plan.md'), planMarkdown);
   writeJson(join(runDir, 'agent-adapter-plan.json'), adapterArtifact);
   appendJsonl(eventsPath, { type: 'adapter_phase_completed', provider: adapterArtifact.provider, phase: 'create_task_breakdown', capabilities: adapterArtifact.capabilities });

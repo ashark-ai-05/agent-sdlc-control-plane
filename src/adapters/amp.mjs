@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path';
-import { checkAmpReadiness, invokeAmpInterpretRequirement } from '../core/amp-runtime.mjs';
+import { checkAmpReadiness, invokeAmpImplementationPlan, invokeAmpInterpretRequirement, invokeAmpTaskBreakdown } from '../core/amp-runtime.mjs';
 import { applyConfigChange, validateConfigFile } from '../core/config.mjs';
 import { adapterContract } from './types.mjs';
 
@@ -84,13 +84,24 @@ export function createAmpAdapter() {
     },
     createTaskBreakdown({ runId, manifest = {}, contextPack = {}, interpretedRequirement = {} }) {
       const intent = interpretedRequirement.intent || interpretedRequirement.summary || 'Unspecified requirement';
+      const prompt = `Create a task breakdown for this enterprise SDLC requirement. Return one JSON object with key tasks, where tasks is an array of objects with id, title, type, and risk. Do not write files or request tool use.\n\nRequirement:\n${intent}`;
+      const request = providerRequest({
+        phase: 'create_task_breakdown',
+        runId,
+        prompt,
+        schema: 'task-breakdown-v1',
+        manifest,
+        contextPack,
+      });
+      const providerResult = invokeAmpTaskBreakdown({ prompt, manifest, contextPack });
+      const liveTaskBreakdown = providerResult.ok ? providerResult.taskBreakdown : null;
       return {
         provider: contract.provider,
         contractVersion: contract.contractVersion,
         phase: 'create_task_breakdown',
         capabilities: contract.capabilities,
         runId,
-        tasks: [
+        tasks: liveTaskBreakdown?.tasks || [
           {
             id: 'task-1',
             title: `Ask Amp to reason about impacted files for: ${intent}`,
@@ -104,43 +115,56 @@ export function createAmpAdapter() {
             risk: 'low',
           },
         ],
-        providerRequest: providerRequest({
-          phase: 'create_task_breakdown',
-          runId,
-          prompt: `Create a task breakdown for this requirement without writing files:\n\n${intent}`,
-          schema: 'task-breakdown-v1',
-          manifest,
-          contextPack,
-        }),
-        audit: audit(),
+        providerRequest: {
+          ...request,
+          externalCallExecuted: providerResult.executed,
+          liveInvocationSucceeded: Boolean(providerResult.ok),
+          providerResultArtifact: providerResult.executed ? 'agent-adapter-task-breakdown-result.json' : null,
+          rawOutputArtifact: providerResult.executed ? 'amp-task-breakdown-raw-output.txt' : null,
+        },
+        providerResult,
+        audit: audit({ providerInvocationExecuted: providerResult.executed }),
       };
     },
     createImplementationPlan({ runId, manifest = {}, contextPack = {}, interpretedRequirement = {}, taskBreakdown = {} }) {
       const intent = interpretedRequirement.intent || interpretedRequirement.summary || 'Unspecified requirement';
+      const fallbackSummary = `Amp skeleton implementation plan request for: ${intent}`;
+      const taskContext = Array.isArray(taskBreakdown.tasks) ? taskBreakdown.tasks.map((task) => `${task.id}: ${task.title}`).join('\n') : 'No task breakdown available';
+      const prompt = `Create an implementation plan for this enterprise SDLC requirement. Return one JSON object with keys: summary, steps, tasks, requiredApprovals. steps must be an array of strings. Do not write files or request tool use.\n\nRequirement:\n${intent}\n\nTask breakdown:\n${taskContext}`;
+      const request = providerRequest({
+        phase: 'create_implementation_plan',
+        runId,
+        prompt,
+        schema: 'implementation-plan-v1',
+        manifest,
+        contextPack,
+      });
+      const providerResult = invokeAmpImplementationPlan({ prompt, fallbackSummary, manifest, contextPack });
+      const liveImplementationPlan = providerResult.ok ? providerResult.implementationPlan : null;
       return {
         provider: contract.provider,
         contractVersion: contract.contractVersion,
         phase: 'create_implementation_plan',
         capabilities: contract.capabilities,
         runId,
-        summary: `Amp skeleton implementation plan request for: ${intent}`,
-        steps: [
+        summary: liveImplementationPlan?.summary || fallbackSummary,
+        steps: liveImplementationPlan?.steps || [
           'Record the Amp planning prompt and expected output schema as an audit artifact.',
           'Require explicit target-file, set-key, and set-value for the safe local execution slice.',
           'Apply only the deterministic control-plane config change until live Amp execution is configured.',
           'Capture diff, validation, confidence, and review artifacts before PR creation.',
         ],
-        tasks: Array.isArray(taskBreakdown.tasks) ? taskBreakdown.tasks.map((task) => task.id) : [],
-        requiredApprovals: ['implementation_plan', 'execution', 'pr_creation'],
-        providerRequest: providerRequest({
-          phase: 'create_implementation_plan',
-          runId,
-          prompt: `Create an implementation plan for this requirement without writing files:\n\n${intent}`,
-          schema: 'implementation-plan-v1',
-          manifest,
-          contextPack,
-        }),
-        audit: audit(),
+        tasks: liveImplementationPlan?.tasks?.length ? liveImplementationPlan.tasks : (Array.isArray(taskBreakdown.tasks) ? taskBreakdown.tasks.map((task) => task.id) : []),
+        requiredApprovals: liveImplementationPlan?.requiredApprovals || ['implementation_plan', 'execution', 'pr_creation'],
+        providerRequest: {
+          ...request,
+          externalCallExecuted: providerResult.executed,
+          liveInvocationSucceeded: Boolean(providerResult.ok),
+          providerResultArtifact: providerResult.executed ? 'agent-adapter-implementation-plan-result.json' : null,
+          rawOutputArtifact: providerResult.executed ? 'amp-implementation-plan-raw-output.txt' : null,
+        },
+        providerResult,
+        audit: audit({ providerInvocationExecuted: providerResult.executed }),
       };
     },
     reviewChanges({ runId, manifest = {}, contextPack = {}, changedFiles = [], validationSummary = {}, confidence = {}, diff = '' }) {
