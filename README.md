@@ -34,9 +34,13 @@ bin/agent-sdlc.mjs                   # thin executable entrypoint
 Handoff docs for continuing on another PC:
 
 ```text
-docs/CONTINUATION_PROMPT.md  # prompt to paste into a new AI coding session
-docs/ARCHITECTURE.md         # architecture notes and future direction
-docs/architecture.html       # browser-openable SVG architecture diagram
+docs/CONTINUATION_PROMPT.md                # prompt to paste into a new AI coding session
+docs/ARCHITECTURE.md                       # architecture notes and future direction
+docs/architecture.html                     # browser-openable SVG architecture diagram
+docs/AGENTIC_SDLC_CONTROL_PLANE.md         # 1-page governed Agentic SDLC control-plane diagram
+docs/blog-agentic-sdlc-control-plane.md    # blog thesis draft
+docs/side-hustle-agent-risk-gate.md        # product scan for agent action risk gating
+docs/prototypes/agentic-ci-failure-explainer.yml # GitHub Actions prototype (copy into .github/workflows when token has workflow scope)
 ```
 
 Implemented MVP commands:
