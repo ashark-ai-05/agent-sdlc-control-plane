@@ -1,0 +1,82 @@
+name: Agentic CI Failure Explainer Prototype
+
+on:
+  workflow_dispatch:
+    inputs:
+      failure_summary:
+        description: "Short description of the CI failure or flaky behaviour to analyse"
+        required: true
+        default: "CI failed; inspect logs and propose next debugging steps"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  explain-ci-failure:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    env:
+      AGENT_SDLC_RUN_ID: ci-failure-${{ github.run_id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Initialise governed agent run
+        run: |
+          node ./bin/agent-sdlc.mjs run init \
+            --repo . \
+            --run "$AGENT_SDLC_RUN_ID" \
+            --workflow-type ci_failure_explainer
+
+      - name: Interpret failure with mock provider
+        run: |
+          FAILURE_SUMMARY="${{ inputs.failure_summary || format('Workflow {0} failed with conclusion {1}', github.event.workflow_run.name, github.event.workflow_run.conclusion) }}"
+          node ./bin/agent-sdlc.mjs feature interpret \
+            --repo . \
+            --run "$AGENT_SDLC_RUN_ID" \
+            --requirement "Explain this CI failure and propose the smallest safe next step: $FAILURE_SUMMARY" \
+            --agent-adapter mock-agent
+
+      - name: Produce plan with mock provider
+        run: |
+          node ./bin/agent-sdlc.mjs feature plan \
+            --repo . \
+            --run "$AGENT_SDLC_RUN_ID" \
+            --agent-adapter mock-agent
+
+      - name: Build audit report
+        run: |
+          node ./bin/agent-sdlc.mjs run audit-report \
+            --repo . \
+            --run "$AGENT_SDLC_RUN_ID" \
+            > ".agentic-sdlc/runs/$AGENT_SDLC_RUN_ID/artifacts/audit-report.md"
+
+      - name: Upload agentic SDLC artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentic-ci-failure-explainer-${{ github.run_id }}
+          path: .agentic-sdlc/runs/${{ env.AGENT_SDLC_RUN_ID }}/
+          if-no-files-found: error
+
+      - name: Job summary
+        run: |
+          {
+            echo "## Agentic CI Failure Explainer Prototype"
+            echo
+            echo "Run ID: \`$AGENT_SDLC_RUN_ID\`"
+            echo
+            echo "This prototype uses the repo-local Agentic SDLC control plane, GitHub Actions permissions, and the mock provider."
+            echo
+            echo "Artifacts were uploaded for review before any PR/comment/write action."
+          } >> "$GITHUB_STEP_SUMMARY"
